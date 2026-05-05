@@ -11,6 +11,7 @@ import ProductSummaryModal, { type SummaryData } from './ProductSummaryModal';
 import TemplatePicker, { type Design } from './TemplatePicker';
 import CreativeQuestionnaire, { type CreativeData } from './CreativeQuestionnaire';
 import { supabase } from '@/lib/supabase';
+import { uploadToBucket } from '@/lib/storage';
 
 // -- Types --
 
@@ -29,7 +30,9 @@ type Step =
   | 'creative-questionnaire'  // creative help questionnaire
   | 'ink-color'          // ink color choice
   | 'add-location'       // yes/no for adding another print location
+  | 'additional-comments' // apparel: optional final comments
   | 'apparel-review'     // apparel: review & submit
+  | 'submitted'           // success state
   | 'promo-art-concept'  // promo: describe artwork concept
   | 'promo-art-files'    // promo: upload reference files
   | 'promo-review';      // promo: review & submit
@@ -39,15 +42,18 @@ interface LocationData {
   artworkType: string;
   selectedDesign: Design | null;
   uploadedFiles: File[];
+  uploadedFilePaths: string[];
   artworkDetails: string;
   templateHeadline: string;
   templateGroupName: string;
   templateVerseRef: string;
   templateChangeDescription: string;
   templateFiles: File[];
-  inkColorChoice: 'match' | 'select';
+  templateFilePaths: string[];
+  inkColorChoice: InkColorChoice;
   selectedInkColors: string[];
   creativeData: CreativeData | null;
+  artistMessage: string;
 }
 
 interface ColorOption {
@@ -117,12 +123,20 @@ const ARTWORK_TYPE_OPTIONS = [
     label: 'I need your creative help.',
     icon: '✨',
   },
+  {
+    id: 'artist',
+    label: 'Talk to a Sunday Cool artist.',
+    icon: '💬',
+  },
 ];
 
 const INK_COLOR_CHOICE_OPTIONS = [
   { id: 'match', label: 'Match my colors as close as possible.', icon: '🎯' },
   { id: 'select', label: 'Select your own.', icon: '🎨' },
+  { id: 'pms', label: 'PMS Match ($25/color, first free at 144+ items).', icon: '🧪' },
 ];
+
+type InkColorChoice = 'match' | 'select' | 'pms';
 
 const INK_COLORS: string[] = [
   '#EEAFCE', '#C5262F', '#FAE78B', '#005683', '#435C69', '#A24188',
@@ -196,11 +210,12 @@ function useStepAnimation(optionsDelay = 400) {
 // -- Main component --
 
 export default function ArtRequestForm() {
-  const [step, setStep] = useState<Step>('welcome');
+  const [step, setStep] = useState<Step>('placement-select');
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const sessionIdRef = useRef<string>(typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   // Selections
-  const [selectedProductType, setSelectedProductType] = useState<string | null>(null);
+  const [selectedProductType, setSelectedProductType] = useState<string | null>('Apparel');
   const [selectedSizing, setSelectedSizing] = useState<'adult' | 'youth' | 'both' | null>(null);
   const [availableApparelProducts, setAvailableApparelProducts] = useState<CardOption[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
@@ -212,6 +227,7 @@ export default function ArtRequestForm() {
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [selectedDesign, setSelectedDesign] = useState<Design | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadedFilePaths, setUploadedFilePaths] = useState<string[]>([]);
   const [selectedPlacement, setSelectedPlacement] = useState<string | null>(null);
   const [artworkDetails, setArtworkDetails] = useState('');
   const [templateHeadline, setTemplateHeadline] = useState('');
@@ -219,17 +235,24 @@ export default function ArtRequestForm() {
   const [templateVerseRef, setTemplateVerseRef] = useState('');
   const [templateChangeDescription, setTemplateChangeDescription] = useState('');
   const [templateFiles, setTemplateFiles] = useState<File[]>([]);
-  const [inkColorChoice, setInkColorChoice] = useState<'match' | 'select' | null>(null);
+  const [templateFilePaths, setTemplateFilePaths] = useState<string[]>([]);
+  const [inkColorChoice, setInkColorChoice] = useState<InkColorChoice | null>(null);
   const [selectedInkColors, setSelectedInkColors] = useState<string[]>([]);
   const [creativeData, setCreativeData] = useState<CreativeData | null>(null);
+  const [artistMessage, setArtistMessage] = useState('');
+  const [talkToArtistOpen, setTalkToArtistOpen] = useState(false);
+  const [artistDraft, setArtistDraft] = useState('');
+  const [additionalComments, setAdditionalComments] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Completed locations array
   const [completedLocations, setCompletedLocations] = useState<LocationData[]>([]);
 
-  // Welcome state
-  const [showWelcomeTyping, setShowWelcomeTyping] = useState(true);
-  const [showWelcomeMessage, setShowWelcomeMessage] = useState(false);
-  const [showButton, setShowButton] = useState(false);
+  // Welcome state (skipped — flow starts at placement-select)
+  const [showWelcomeTyping] = useState(false);
+  const [showWelcomeMessage] = useState(false);
+  const [showButton] = useState(false);
 
   // Step animations
   const productTypeAnim = useStepAnimation();
@@ -245,6 +268,7 @@ export default function ArtRequestForm() {
   const artworkDetailsAnim = useStepAnimation();
   const addLocationAnim = useStepAnimation();
   const inkColorAnim = useStepAnimation();
+  const additionalCommentsAnim = useStepAnimation();
 
   // Apparel review state
   const [selectedApparelColor, setSelectedApparelColor] = useState<string | null>(null);
@@ -253,6 +277,7 @@ export default function ArtRequestForm() {
   // Promo art request state
   const [promoArtConcept, setPromoArtConcept] = useState('');
   const [promoArtFiles, setPromoArtFiles] = useState<File[]>([]);
+  const [promoArtFilePaths, setPromoArtFilePaths] = useState<string[]>([]);
   const [selectedPromoColor, setSelectedPromoColor] = useState<string | null>(null);
   const promoArtConceptAnim = useStepAnimation();
   const promoArtFilesAnim = useStepAnimation();
@@ -272,22 +297,10 @@ export default function ArtRequestForm() {
     return () => clearTimeout(t);
   }, [step, colors, promoProducts, promoCategories, availableApparelProducts, uploadedFiles, templateFiles, completedLocations]);
 
-  // -- Welcome sequence --
+  // -- Initial step: placement-select (run once on mount) --
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setShowWelcomeTyping(false);
-      setShowWelcomeMessage(true);
-    }, 1500);
-    return () => clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
-    if (showWelcomeMessage && step === 'welcome') {
-      const t = setTimeout(() => setShowButton(true), 600);
-      return () => clearTimeout(t);
-    }
-  }, [showWelcomeMessage, step]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { placementAnim.start(); }, []);
 
   const handleGetStarted = () => {
     setStep('product-type');
@@ -421,13 +434,40 @@ export default function ArtRequestForm() {
     }
   };
 
-  const handleApparelSubmit = () => {
-    console.log('Apparel request submitted', {
-      product: selectedProduct,
+  const handleApparelSubmit = async () => {
+    setSubmitError(null);
+    setSubmitting(true);
+    const payload = {
+      session_id: sessionIdRef.current,
+      product_type: 'Apparel',
+      product_category: selectedProduct,
       sizing: selectedSizing,
-      color: selectedApparelColor,
-      locations: completedLocations,
-    });
+      apparel_color: selectedApparelColor,
+      additional_comments: additionalComments,
+      locations: completedLocations.map((l) => ({
+        placement: l.placement,
+        artworkType: l.artworkType,
+        selectedDesign: l.selectedDesign,
+        uploadedFilePaths: l.uploadedFilePaths,
+        artworkDetails: l.artworkDetails,
+        templateHeadline: l.templateHeadline,
+        templateGroupName: l.templateGroupName,
+        templateVerseRef: l.templateVerseRef,
+        templateChangeDescription: l.templateChangeDescription,
+        templateFilePaths: l.templateFilePaths,
+        inkColorChoice: l.inkColorChoice,
+        selectedInkColors: l.selectedInkColors,
+        creativeData: l.creativeData,
+        artistMessage: l.artistMessage,
+      })),
+    };
+    const { error } = await supabase.from('art_requests').insert(payload);
+    setSubmitting(false);
+    if (error) {
+      setSubmitError(error.message);
+      return;
+    }
+    setStep('submitted');
   };
 
   const handleApparelStartOver = () => {
@@ -443,15 +483,18 @@ export default function ArtRequestForm() {
     setSelectedArtworkType(null);
     setSelectedDesign(null);
     setUploadedFiles([]);
+    setUploadedFilePaths([]);
     setArtworkDetails('');
     setTemplateHeadline('');
     setTemplateGroupName('');
     setTemplateVerseRef('');
     setTemplateChangeDescription('');
     setTemplateFiles([]);
+    setTemplateFilePaths([]);
     setInkColorChoice(null);
     setSelectedInkColors([]);
     setCreativeData(null);
+    setArtistMessage('');
   };
 
   const handlePromoArtConceptSubmit = () => {
@@ -464,14 +507,25 @@ export default function ArtRequestForm() {
     promoReviewAnim.start();
   };
 
-  const handlePromoSubmit = () => {
-    console.log('Promo request submitted', {
-      category: selectedPromoCategory,
-      product: selectedPromoProduct,
-      color: selectedPromoColor,
-      artConcept: promoArtConcept,
-      files: promoArtFiles.map((f) => f.name),
-    });
+  const handlePromoSubmit = async () => {
+    setSubmitError(null);
+    setSubmitting(true);
+    const payload = {
+      session_id: sessionIdRef.current,
+      product_type: 'Promo Items',
+      promo_category: selectedPromoCategory,
+      promo_product: selectedPromoProduct,
+      promo_color: selectedPromoColor,
+      promo_art_concept: promoArtConcept,
+      promo_art_file_paths: promoArtFilePaths,
+    };
+    const { error } = await supabase.from('art_requests').insert(payload);
+    setSubmitting(false);
+    if (error) {
+      setSubmitError(error.message);
+      return;
+    }
+    setStep('submitted');
   };
 
   const handlePromoStartOver = () => {
@@ -499,7 +553,22 @@ export default function ArtRequestForm() {
     } else if (optionId === 'creative') {
       setStep('creative-questionnaire');
       creativeQuestionnaireAnim.start();
+    } else if (optionId === 'artist') {
+      setArtistDraft('');
+      setTalkToArtistOpen(true);
     }
+  };
+
+  const handleArtistSubmit = () => {
+    setArtistMessage(artistDraft);
+    setTalkToArtistOpen(false);
+    setStep('ink-color');
+    inkColorAnim.start();
+  };
+
+  const handleArtistCancel = () => {
+    setTalkToArtistOpen(false);
+    setSelectedArtworkType(null);
   };
 
   const handleDesignSelect = (design: Design) => {
@@ -536,9 +605,9 @@ export default function ArtRequestForm() {
     inkColorAnim.start();
   };
 
-  const handleInkColorChoice = (choice: 'match' | 'select') => {
+  const handleInkColorChoice = (choice: InkColorChoice) => {
     setInkColorChoice(choice);
-    if (choice === 'match') {
+    if (choice === 'match' || choice === 'pms') {
       setStep('add-location');
       addLocationAnim.start();
     }
@@ -564,30 +633,36 @@ export default function ArtRequestForm() {
       artworkType: selectedArtworkType!,
       selectedDesign,
       uploadedFiles,
+      uploadedFilePaths,
       artworkDetails,
       templateHeadline,
       templateGroupName,
       templateVerseRef,
       templateChangeDescription,
       templateFiles,
+      templateFilePaths,
       inkColorChoice: inkColorChoice!,
       selectedInkColors,
       creativeData,
+      artistMessage,
     }]);
     // Reset active state
     setSelectedPlacement(null);
     setSelectedArtworkType(null);
     setSelectedDesign(null);
     setUploadedFiles([]);
+    setUploadedFilePaths([]);
     setArtworkDetails('');
     setTemplateHeadline('');
     setTemplateGroupName('');
     setTemplateVerseRef('');
     setTemplateChangeDescription('');
     setTemplateFiles([]);
+    setTemplateFilePaths([]);
     setInkColorChoice(null);
     setSelectedInkColors([]);
     setCreativeData(null);
+    setArtistMessage('');
   };
 
   const handleAddLocationChoice = (wantsAnother: boolean) => {
@@ -596,9 +671,14 @@ export default function ArtRequestForm() {
       setStep('placement-select');
       placementAnim.start();
     } else {
-      setStep('apparel-review');
-      apparelReviewAnim.start();
+      setStep('additional-comments');
+      additionalCommentsAnim.start();
     }
+  };
+
+  const handleAdditionalCommentsContinue = () => {
+    setStep('apparel-review');
+    apparelReviewAnim.start();
   };
 
   // -- Supabase fetchers --
@@ -759,7 +839,7 @@ export default function ArtRequestForm() {
                 <ChatBubble key="pt-msg" message="What products are you interested in?" />
               )}
               {/* User reply (once past this step) */}
-              {pastProductType && selectedProductType && (
+              {pastProductType && selectedProductType && productTypeAnim.showMessage && (
                 <UserReply text={selectedProductType} />
               )}
               {/* Cards (only on this step) */}
@@ -1021,6 +1101,9 @@ export default function ArtRequestForm() {
                       files={promoArtFiles}
                       onFilesChange={setPromoArtFiles}
                       onContinue={handlePromoArtFilesContinue}
+                      sessionId={sessionIdRef.current}
+                      folder="promo"
+                      onUploadedPathsChange={setPromoArtFilePaths}
                     />
                     <motion.button
                       className="mt-3 text-sm font-medium text-gray-500 hover:text-gray-700 underline transition-colors cursor-pointer"
@@ -1089,13 +1172,14 @@ export default function ArtRequestForm() {
                     </div>
                     <div className="flex gap-3 mt-4">
                       <motion.button
-                        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors cursor-pointer"
+                        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3 }}
                         onClick={handlePromoSubmit}
+                        disabled={submitting}
                       >
-                        Submit
+                        {submitting ? 'Submitting…' : 'Submit'}
                       </motion.button>
                       <motion.button
                         className="bg-white text-gray-700 px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border border-gray-200 hover:border-gray-400 transition-colors cursor-pointer"
@@ -1103,10 +1187,14 @@ export default function ArtRequestForm() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3, delay: 0.1 }}
                         onClick={handlePromoStartOver}
+                        disabled={submitting}
                       >
                         Start Over
                       </motion.button>
                     </div>
+                    {submitError && (
+                      <p className="mt-3 text-sm text-red-600">Error submitting: {submitError}</p>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1117,10 +1205,7 @@ export default function ArtRequestForm() {
           {completedLocations.map((loc, i) => (
             <div key={i}>
               {i === 0 ? (
-                <>
-                  <ChatBubble message="Let's get started on the specifics of your artwork." delay={0} />
-                  <ChatBubble message="What is the location placement of this artwork?" delay={0} />
-                </>
+                <ChatBubble message="What is the location placement of this artwork?" delay={0} />
               ) : (
                 <ChatBubble message="Let's work on your next location. What is the location placement?" delay={0} />
               )}
@@ -1141,6 +1226,10 @@ export default function ArtRequestForm() {
                     loc.templateVerseRef && `Verse: ${loc.templateVerseRef}`,
                   ].filter(Boolean).join(' | ') || 'Template details submitted'} />
                 </>
+              )}
+              {/* Talk-to-artist reply if applicable */}
+              {loc.artworkType === 'Talk to a Sunday Cool artist.' && loc.artistMessage && (
+                <UserReply text={loc.artistMessage.length > 160 ? loc.artistMessage.slice(0, 160) + '…' : loc.artistMessage} />
               )}
               {/* Creative help reply if applicable */}
               {loc.artworkType === 'I need your creative help.' && loc.creativeData && (
@@ -1165,7 +1254,9 @@ export default function ArtRequestForm() {
               <ChatBubble message="What ink colors would you like to use?" delay={0} />
               <UserReply text={loc.inkColorChoice === 'match'
                 ? 'Match my colors as close as possible.'
-                : `Selected ${loc.selectedInkColors.length} ink color${loc.selectedInkColors.length !== 1 ? 's' : ''}`
+                : loc.inkColorChoice === 'pms'
+                  ? 'PMS Match.'
+                  : `Selected ${loc.selectedInkColors.length} ink color${loc.selectedInkColors.length !== 1 ? 's' : ''}`
               } />
               <ChatBubble message="Would you like to add another print location?" delay={0} />
               <UserReply text={i < completedLocations.length - 1 || step !== 'apparel-review' ? 'Yes' : "No, I'm all set"} />
@@ -1184,10 +1275,7 @@ export default function ArtRequestForm() {
               </AnimatePresence>
               {placementAnim.showMessage && (
                 isFirstLocation ? (
-                  <>
-                    <ChatBubble key="pl-intro" message="Let's get started on the specifics of your artwork." />
-                    <ChatBubble key="pl-msg" message="What is the location placement of this artwork?" delay={0.6} />
-                  </>
+                  <ChatBubble key="pl-msg" message="What is the location placement of this artwork?" />
                 ) : (
                   <ChatBubble key="pl-msg" message="Let's work on your next location. What is the location placement?" />
                 )
@@ -1266,6 +1354,11 @@ export default function ArtRequestForm() {
               {/* Show the selected design as a chat card (template path) */}
               {selectedDesign && (
                 <DesignCard design={selectedDesign} />
+              )}
+
+              {/* Artist message reply (talk-to-artist path) */}
+              {selectedArtworkType === 'Talk to a Sunday Cool artist.' && artistMessage && (
+                <UserReply text={artistMessage.length > 160 ? artistMessage.slice(0, 160) + '…' : artistMessage} />
               )}
 
               {/* Options (only on artwork-type step, hidden once committed) */}
@@ -1371,6 +1464,9 @@ export default function ArtRequestForm() {
                       files={templateFiles}
                       onFilesChange={setTemplateFiles}
                       onContinue={handleTemplateDetailsContinue}
+                      sessionId={sessionIdRef.current}
+                      folder={`location-${completedLocations.length + 1}/template`}
+                      onUploadedPathsChange={setTemplateFilePaths}
                     />
                   </motion.div>
                 )}
@@ -1407,6 +1503,9 @@ export default function ArtRequestForm() {
                       files={uploadedFiles}
                       onFilesChange={setUploadedFiles}
                       onContinue={handleFileUploadContinue}
+                      sessionId={sessionIdRef.current}
+                      folder={`location-${completedLocations.length + 1}/own-art`}
+                      onUploadedPathsChange={setUploadedFilePaths}
                     />
                   </motion.div>
                 )}
@@ -1480,7 +1579,9 @@ export default function ArtRequestForm() {
                   text={
                     inkColorChoice === 'match'
                       ? 'Match my colors as close as possible.'
-                      : `Selected ${selectedInkColors.length} ink color${selectedInkColors.length !== 1 ? 's' : ''}`
+                      : inkColorChoice === 'pms'
+                        ? 'PMS Match.'
+                        : `Selected ${selectedInkColors.length} ink color${selectedInkColors.length !== 1 ? 's' : ''}`
                   }
                 />
               )}
@@ -1506,7 +1607,7 @@ export default function ArtRequestForm() {
                           transition={{ duration: 0.4, delay: i * 0.1, ease: 'easeOut' }}
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
-                          onClick={() => handleInkColorChoice(opt.id as 'match' | 'select')}
+                          onClick={() => handleInkColorChoice(opt.id as InkColorChoice)}
                         >
                           <span className="text-2xl">{opt.icon}</span>
                           <span className="text-sm font-medium text-gray-800 group-hover:text-brand-orange transition-colors">
@@ -1582,6 +1683,58 @@ export default function ArtRequestForm() {
                         </motion.button>
                       ))}
                     </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </>
+          )}
+
+          {/* --- Additional Comments --- */}
+          {selectedProductType === 'Apparel' && (step === 'additional-comments' || step === 'apparel-review') && (
+            <>
+              <AnimatePresence>
+                {additionalCommentsAnim.showTyping && (
+                  <motion.div key="ac-typing" exit={{ opacity: 0, transition: { duration: 0.2 } }}>
+                    <TypingIndicator />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              {additionalCommentsAnim.showMessage && (
+                <ChatBubble key="ac-msg" message="Anything else we should know about this art request?" />
+              )}
+
+              {/* Reply once they continue */}
+              {step === 'apparel-review' && additionalComments.trim() && (
+                <UserReply text={additionalComments.length > 160 ? additionalComments.slice(0, 160) + '…' : additionalComments} />
+              )}
+              {step === 'apparel-review' && !additionalComments.trim() && (
+                <UserReply text="No additional comments." />
+              )}
+
+              {/* Textarea + continue (only on this step) */}
+              <AnimatePresence>
+                {additionalCommentsAnim.showOptions && step === 'additional-comments' && (
+                  <motion.div
+                    key="ac-input"
+                    className="px-4 pl-15 max-w-md"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, transition: { duration: 0.2 } }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <textarea
+                      value={additionalComments}
+                      onChange={(e) => setAdditionalComments(e.target.value)}
+                      placeholder="Anything else we should know about this art request?"
+                      rows={4}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-brand-orange resize-none"
+                    />
+                    <button
+                      className="mt-3 bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors"
+                      onClick={handleAdditionalCommentsContinue}
+                    >
+                      Continue
+                    </button>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1674,7 +1827,9 @@ export default function ArtRequestForm() {
                                 <span className="font-medium text-gray-800">
                                   {loc.inkColorChoice === 'match'
                                     ? 'Match colors'
-                                    : `${loc.selectedInkColors.length} selected`}
+                                    : loc.inkColorChoice === 'pms'
+                                      ? 'PMS Match'
+                                      : `${loc.selectedInkColors.length} selected`}
                                 </span>
                               </div>
                             </div>
@@ -1684,13 +1839,14 @@ export default function ArtRequestForm() {
                     </div>
                     <div className="flex gap-3 mt-4">
                       <motion.button
-                        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors cursor-pointer"
+                        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3 }}
                         onClick={handleApparelSubmit}
+                        disabled={submitting}
                       >
-                        Submit
+                        {submitting ? 'Submitting…' : 'Submit'}
                       </motion.button>
                       <motion.button
                         className="bg-white text-gray-700 px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border border-gray-200 hover:border-gray-400 transition-colors cursor-pointer"
@@ -1698,13 +1854,24 @@ export default function ArtRequestForm() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3, delay: 0.1 }}
                         onClick={handleApparelStartOver}
+                        disabled={submitting}
                       >
                         Start Over
                       </motion.button>
                     </div>
+                    {submitError && (
+                      <p className="mt-3 text-sm text-red-600">Error submitting: {submitError}</p>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
+            </>
+          )}
+
+          {step === 'submitted' && (
+            <>
+              <ChatBubble message="Your art request has been submitted! 🎉" delay={0} />
+              <ChatBubble message="A Sunday Cool artist will be in touch soon. You can close this window." delay={0.4} />
             </>
           )}
 
@@ -1722,6 +1889,59 @@ export default function ArtRequestForm() {
         onSelect={handleDesignSelect}
         apparelProduct={selectedProduct ?? ''}
       />
+
+      {/* Talk-to-artist modal */}
+      <AnimatePresence>
+        {talkToArtistOpen && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={handleArtistCancel}
+          >
+            <motion.div
+              className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6"
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              transition={{ duration: 0.2 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-heading uppercase tracking-wide text-brand-black mb-1">
+                Talk to a Sunday Cool artist
+              </h2>
+              <p className="text-sm text-gray-500 mb-4">
+                Tell us what you have in mind. An artist will follow up to walk through your project.
+              </p>
+              <textarea
+                value={artistDraft}
+                onChange={(e) => setArtistDraft(e.target.value)}
+                placeholder="Describe your project, vibe, references, deadlines, or any questions…"
+                rows={6}
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-brand-orange resize-none"
+                autoFocus
+              />
+              <div className="flex justify-end gap-3 mt-5">
+                <button
+                  className="px-5 py-2.5 rounded-full text-sm font-heading uppercase tracking-wide text-gray-700 border border-gray-200 hover:border-gray-400 transition-colors"
+                  onClick={handleArtistCancel}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="px-5 py-2.5 rounded-full text-sm font-heading uppercase tracking-wide bg-brand-black text-white hover:bg-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  onClick={handleArtistSubmit}
+                  disabled={artistDraft.trim().length === 0}
+                >
+                  Submit
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1891,29 +2111,86 @@ function isLightColor(hex: string): boolean {
   return (r * 299 + g * 587 + b * 114) / 1000 > 160;
 }
 
+type UploadStatus = 'uploading' | 'done' | 'error';
+interface UploadEntry {
+  status: UploadStatus;
+  path?: string;
+  error?: string;
+}
+
 function FileUploadZone({
   files,
   onFilesChange,
   onContinue,
   showContinueButton = true,
+  sessionId,
+  folder,
+  onUploadedPathsChange,
 }: {
   files: File[];
   onFilesChange: (files: File[]) => void;
   onContinue: () => void;
   showContinueButton?: boolean;
+  sessionId: string;
+  folder: string;
+  onUploadedPathsChange?: (paths: string[]) => void;
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [uploads, setUploads] = useState<Map<File, UploadEntry>>(new Map());
 
-  const addFiles = (incoming: FileList | null) => {
+  const reportPaths = useCallback((map: Map<File, UploadEntry>) => {
+    if (!onUploadedPathsChange) return;
+    const paths = Array.from(map.values())
+      .filter((e) => e.status === 'done' && e.path)
+      .map((e) => e.path!);
+    onUploadedPathsChange(paths);
+  }, [onUploadedPathsChange]);
+
+  const addFiles = async (incoming: FileList | null) => {
     if (!incoming) return;
-    const next = [...files, ...Array.from(incoming)];
+    const newFiles = Array.from(incoming);
+    const next = [...files, ...newFiles];
     onFilesChange(next);
+
+    setUploads((prev) => {
+      const m = new Map(prev);
+      newFiles.forEach((f) => m.set(f, { status: 'uploading' }));
+      return m;
+    });
+
+    await Promise.all(newFiles.map(async (file) => {
+      try {
+        const { path } = await uploadToBucket(file, sessionId, folder);
+        setUploads((prev) => {
+          const m = new Map(prev);
+          m.set(file, { status: 'done', path });
+          reportPaths(m);
+          return m;
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Upload failed';
+        setUploads((prev) => {
+          const m = new Map(prev);
+          m.set(file, { status: 'error', error: message });
+          return m;
+        });
+      }
+    }));
   };
 
   const removeFile = (index: number) => {
+    const file = files[index];
     onFilesChange(files.filter((_, i) => i !== index));
+    setUploads((prev) => {
+      const m = new Map(prev);
+      m.delete(file);
+      reportPaths(m);
+      return m;
+    });
   };
+
+  const anyUploading = Array.from(uploads.values()).some((e) => e.status === 'uploading');
 
   return (
     <div className="max-w-md space-y-3">
@@ -1953,50 +2230,57 @@ function FileUploadZone({
       {/* File list */}
       {files.length > 0 && (
         <div className="space-y-2">
-          {files.map((file, i) => (
-            <div
-              key={`${file.name}-${i}`}
-              className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2"
-            >
-              {file.type.startsWith('image/') ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={URL.createObjectURL(file)}
-                  alt={file.name}
-                  className="w-10 h-10 rounded object-cover flex-shrink-0"
-                />
-              ) : (
-                <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                  <span className="text-lg">📄</span>
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-gray-800 truncate">{file.name}</p>
-                <p className="text-xs text-gray-500">
-                  {(file.size / 1024).toFixed(0)} KB
-                </p>
-              </div>
-              <button
-                className="text-gray-400 hover:text-red-500 transition-colors text-lg flex-shrink-0"
-                onClick={(e) => { e.stopPropagation(); removeFile(i); }}
+          {files.map((file, i) => {
+            const entry = uploads.get(file);
+            return (
+              <div
+                key={`${file.name}-${i}`}
+                className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2"
               >
-                &times;
-              </button>
-            </div>
-          ))}
+                {file.type.startsWith('image/') ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={URL.createObjectURL(file)}
+                    alt={file.name}
+                    className="w-10 h-10 rounded object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-lg">📄</span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-800 truncate">{file.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {(file.size / 1024).toFixed(0)} KB
+                    {entry?.status === 'uploading' && ' · Uploading…'}
+                    {entry?.status === 'done' && ' · ✓ Uploaded'}
+                    {entry?.status === 'error' && ` · ✗ ${entry.error ?? 'Upload failed'}`}
+                  </p>
+                </div>
+                <button
+                  className="text-gray-400 hover:text-red-500 transition-colors text-lg flex-shrink-0"
+                  onClick={(e) => { e.stopPropagation(); removeFile(i); }}
+                >
+                  &times;
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
       {/* Continue button */}
       {showContinueButton && files.length > 0 && (
         <motion.button
-          className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors"
+          className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
           onClick={onContinue}
+          disabled={anyUploading}
         >
-          Continue
+          {anyUploading ? 'Uploading…' : 'Continue'}
         </motion.button>
       )}
     </div>
@@ -2015,6 +2299,9 @@ function TemplateDetailsForm({
   files,
   onFilesChange,
   onContinue,
+  sessionId,
+  folder,
+  onUploadedPathsChange,
 }: {
   headline: string;
   onHeadlineChange: (v: string) => void;
@@ -2027,6 +2314,9 @@ function TemplateDetailsForm({
   files: File[];
   onFilesChange: (files: File[]) => void;
   onContinue: () => void;
+  sessionId: string;
+  folder: string;
+  onUploadedPathsChange?: (paths: string[]) => void;
 }) {
   return (
     <div className="max-w-md space-y-4">
@@ -2083,6 +2373,9 @@ function TemplateDetailsForm({
           onFilesChange={onFilesChange}
           onContinue={() => {}}
           showContinueButton={false}
+          sessionId={sessionId}
+          folder={folder}
+          onUploadedPathsChange={onUploadedPathsChange}
         />
       </div>
 
