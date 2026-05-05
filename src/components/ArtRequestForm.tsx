@@ -10,6 +10,8 @@ import ColorSwatch from './ColorSwatch';
 import ProductSummaryModal, { type SummaryData } from './ProductSummaryModal';
 import TemplatePicker, { type Design } from './TemplatePicker';
 import CreativeQuestionnaire, { type CreativeData } from './CreativeQuestionnaire';
+import SpecialtyInksPicker from './SpecialtyInksPicker';
+import PMSColorModal, { type PMSEntry } from './PMSColorModal';
 import { supabase } from '@/lib/supabase';
 import { uploadToBucket } from '@/lib/storage';
 
@@ -52,6 +54,8 @@ interface LocationData {
   templateFilePaths: string[];
   inkColorChoice: InkColorChoice;
   selectedInkColors: string[];
+  selectedSpecialtyInks: string[];
+  pmsEntries: PMSEntry[];
   creativeData: CreativeData | null;
   artistMessage: string;
 }
@@ -119,13 +123,8 @@ const ARTWORK_TYPE_OPTIONS = [
     icon: '🎨',
   },
   {
-    id: 'creative',
-    label: 'I need your creative help.',
-    icon: '✨',
-  },
-  {
     id: 'artist',
-    label: 'Talk to a Sunday Cool artist.',
+    label: 'I am not sure.',
     icon: '💬',
   },
 ];
@@ -209,7 +208,7 @@ function useStepAnimation(optionsDelay = 400) {
 
 // -- Main component --
 
-export default function ArtRequestForm() {
+export default function ArtRequestForm({ embedded = false }: { embedded?: boolean } = {}) {
   const [step, setStep] = useState<Step>('placement-select');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string>(typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -238,6 +237,9 @@ export default function ArtRequestForm() {
   const [templateFilePaths, setTemplateFilePaths] = useState<string[]>([]);
   const [inkColorChoice, setInkColorChoice] = useState<InkColorChoice | null>(null);
   const [selectedInkColors, setSelectedInkColors] = useState<string[]>([]);
+  const [selectedSpecialtyInks, setSelectedSpecialtyInks] = useState<string[]>([]);
+  const [pmsEntries, setPmsEntries] = useState<PMSEntry[]>([]);
+  const [pmsModalOpen, setPmsModalOpen] = useState(false);
   const [creativeData, setCreativeData] = useState<CreativeData | null>(null);
   const [artistMessage, setArtistMessage] = useState('');
   const [talkToArtistOpen, setTalkToArtistOpen] = useState(false);
@@ -291,11 +293,22 @@ export default function ArtRequestForm() {
   // Summary modal
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
 
-  // Auto-scroll on step change
+  // Auto-scroll: pin the active question near the top of the viewport across animation phases.
   useEffect(() => {
-    const t = setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 300);
-    return () => clearTimeout(t);
-  }, [step, colors, promoProducts, promoCategories, availableApparelProducts, uploadedFiles, templateFiles, completedLocations]);
+    if (step === 'welcome') return;
+    const scrollToActiveQuestion = () => {
+      const bubbles = document.querySelectorAll<HTMLElement>('[data-chat-bubble]');
+      const last = bubbles[bubbles.length - 1];
+      if (!last) {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        return;
+      }
+      const top = last.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top: Math.max(top - 96, 0), behavior: 'smooth' });
+    };
+    const timers = [200, 1300, 1900, 2400].map((ms) => setTimeout(scrollToActiveQuestion, ms));
+    return () => timers.forEach(clearTimeout);
+  }, [step, colors, promoProducts, promoCategories, availableApparelProducts, uploadedFiles, templateFiles, completedLocations, selectedArtworkType, inkColorChoice, pmsEntries, selectedSpecialtyInks]);
 
   // -- Initial step: placement-select (run once on mount) --
 
@@ -457,6 +470,8 @@ export default function ArtRequestForm() {
         templateFilePaths: l.templateFilePaths,
         inkColorChoice: l.inkColorChoice,
         selectedInkColors: l.selectedInkColors,
+        selectedSpecialtyInks: l.selectedSpecialtyInks,
+        pmsEntries: l.pmsEntries,
         creativeData: l.creativeData,
         artistMessage: l.artistMessage,
       })),
@@ -493,6 +508,8 @@ export default function ArtRequestForm() {
     setTemplateFilePaths([]);
     setInkColorChoice(null);
     setSelectedInkColors([]);
+    setSelectedSpecialtyInks([]);
+    setPmsEntries([]);
     setCreativeData(null);
     setArtistMessage('');
   };
@@ -555,6 +572,8 @@ export default function ArtRequestForm() {
       creativeQuestionnaireAnim.start();
     } else if (optionId === 'artist') {
       setArtistDraft('');
+      setUploadedFiles([]);
+      setUploadedFilePaths([]);
       setTalkToArtistOpen(true);
     }
   };
@@ -569,6 +588,8 @@ export default function ArtRequestForm() {
   const handleArtistCancel = () => {
     setTalkToArtistOpen(false);
     setSelectedArtworkType(null);
+    setUploadedFiles([]);
+    setUploadedFilePaths([]);
   };
 
   const handleDesignSelect = (design: Design) => {
@@ -607,11 +628,10 @@ export default function ArtRequestForm() {
 
   const handleInkColorChoice = (choice: InkColorChoice) => {
     setInkColorChoice(choice);
-    if (choice === 'match' || choice === 'pms') {
-      setStep('add-location');
-      addLocationAnim.start();
+    if (choice === 'pms') {
+      setPmsModalOpen(true);
     }
-    // 'select' stays on ink-color step to show color grid
+    // Stay on ink-color step so the user can also pick specialty inks before advancing.
   };
 
   const handleInkColorToggle = (hex: string) => {
@@ -643,6 +663,8 @@ export default function ArtRequestForm() {
       templateFilePaths,
       inkColorChoice: inkColorChoice!,
       selectedInkColors,
+      selectedSpecialtyInks,
+      pmsEntries,
       creativeData,
       artistMessage,
     }]);
@@ -661,6 +683,8 @@ export default function ArtRequestForm() {
     setTemplateFilePaths([]);
     setInkColorChoice(null);
     setSelectedInkColors([]);
+    setSelectedSpecialtyInks([]);
+    setPmsEntries([]);
     setCreativeData(null);
     setArtistMessage('');
   };
@@ -776,23 +800,64 @@ export default function ArtRequestForm() {
   // -- Render --
 
   return (
-    <div className="min-h-screen bg-brand-daylight flex flex-col">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-brand-black flex items-center justify-center">
-            <span className="text-white text-sm font-heading">SC</span>
+    <div className={embedded ? '' : 'min-h-screen flex flex-col'}>
+      {!embedded && (
+        <header className="sticky top-0 z-30 backdrop-blur-md bg-brand-daylight/85 border-b-2 border-brand-black px-4 py-3">
+          <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div
+                className="relative w-12 h-12 rounded-full bg-white flex items-center justify-center overflow-hidden border-2 border-brand-black sc-wobble"
+                style={{ boxShadow: '3px 3px 0 0 #f6912d' }}
+              >
+                <Image
+                  src="/sunday-cool-logo.avif"
+                  alt="Sunday Cool"
+                  width={40}
+                  height={40}
+                  className="object-contain p-1"
+                />
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-brand-yellow border-2 border-brand-black" />
+              </div>
+              <div className="leading-tight">
+                <h1 className="sc-display text-xl uppercase text-brand-black">Sunday Cool</h1>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-brand-black/60 font-body">Art Request</p>
+              </div>
+            </div>
+            <div className="hidden sm:flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-brand-orange animate-pulse" />
+              <span className="text-[10px] uppercase tracking-[0.2em] text-brand-black/60">Live</span>
+            </div>
           </div>
-          <div>
-            <h1 className="text-sm font-heading uppercase text-brand-black">Sunday Cool</h1>
-            <p className="text-xs text-gray-500 font-body">Art Request Form</p>
-          </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       {/* Chat area */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto py-6 space-y-4">
+      <div className={embedded ? '' : 'flex-1 overflow-y-auto'}>
+        <div className="max-w-2xl mx-auto py-8 space-y-5 px-1">
+
+          {/* --- Hero banner (welcome only) --- */}
+          {step === 'welcome' && (
+            <motion.div
+              className="px-4 pt-4 pb-2 text-center"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <span className="inline-flex items-center gap-2 bg-white border-2 border-brand-black rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.22em] font-heading text-brand-black mb-4"
+                style={{ boxShadow: '2px 2px 0 0 #1a1a1a' }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-orange" />
+                New project
+              </span>
+              <h2 className="sc-display text-[clamp(2.4rem,7vw,4rem)] uppercase text-brand-black leading-[0.9]">
+                Let&apos;s make<br/>
+                <span className="sc-underline">something cool.</span>
+              </h2>
+              <p className="mt-3 text-sm text-brand-black/60 max-w-md mx-auto">
+                A quick chat — about 8 minutes — and we&apos;ll have everything we need to build your art.
+              </p>
+            </motion.div>
+          )}
 
           {/* --- Welcome --- */}
           <AnimatePresence>
@@ -817,9 +882,11 @@ export default function ArtRequestForm() {
               >
                 <button
                   onClick={handleGetStarted}
-                  className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors"
+                  className="group inline-flex items-center gap-2.5 bg-brand-orange text-brand-black px-7 py-3.5 rounded-full sc-display text-xl uppercase border-2 border-brand-black sc-lift"
+                  style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
                 >
                   Get Started
+                  <span className="inline-block transition-transform duration-300 group-hover:translate-x-1">→</span>
                 </button>
               </motion.div>
             )}
@@ -893,16 +960,17 @@ export default function ArtRequestForm() {
                       {SIZING_OPTIONS.map((opt, i) => (
                         <motion.button
                           key={opt.id}
-                          className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-5 py-4 text-left shadow-sm hover:border-brand-orange hover:shadow-md transition-all cursor-pointer group"
+                          className="flex items-center gap-4 bg-white border-2 border-brand-black rounded-2xl px-5 py-4 text-left cursor-pointer group sc-lift"
+                          style={{ boxShadow: '3px 3px 0 0 #1a1a1a' }}
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ duration: 0.4, delay: i * 0.1, ease: 'easeOut' }}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
+                          
+                          
                           onClick={() => handleSizingSelect(opt.id)}
                         >
-                          <span className="text-2xl">{opt.icon}</span>
-                          <span className="text-sm font-medium text-gray-800 group-hover:text-brand-orange transition-colors">
+                          <span className="flex-shrink-0 w-10 h-10 rounded-full bg-brand-butter border-2 border-brand-black flex items-center justify-center text-xl">{opt.icon}</span>
+                          <span className="text-[15px] font-semibold text-brand-black flex-1">
                             {opt.label}
                           </span>
                         </motion.button>
@@ -1106,7 +1174,7 @@ export default function ArtRequestForm() {
                       onUploadedPathsChange={setPromoArtFilePaths}
                     />
                     <motion.button
-                      className="mt-3 text-sm font-medium text-gray-500 hover:text-gray-700 underline transition-colors cursor-pointer"
+                      className="mt-3 text-[11px] font-heading uppercase tracking-[0.18em] text-brand-black/55 hover:text-brand-black underline underline-offset-4 transition-colors cursor-pointer"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.3, delay: 0.2 }}
@@ -1143,36 +1211,29 @@ export default function ArtRequestForm() {
                     exit={{ opacity: 0, transition: { duration: 0.2 } }}
                     transition={{ duration: 0.3 }}
                   >
-                    <div className="max-w-md bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-3">
-                      <h3 className="text-sm font-heading uppercase tracking-wide text-brand-black">Promo Request Summary</h3>
-                      <div className="space-y-2 text-sm font-body text-gray-700">
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Category</span>
-                          <span className="font-medium">{selectedPromoCategory}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Product</span>
-                          <span className="font-medium">{selectedPromoProduct}</span>
-                        </div>
-                        {selectedPromoColor && (
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Color</span>
-                            <span className="font-medium">{selectedPromoColor}</span>
-                          </div>
-                        )}
+                    <div
+                      className="relative max-w-md bg-white rounded-3xl border-2 border-brand-black p-6 space-y-4"
+                      style={{ boxShadow: '5px 5px 0 0 #1a1a1a' }}
+                    >
+                      <span className="absolute -top-3 left-5 inline-flex items-center gap-1.5 bg-brand-yellow text-brand-black text-[10px] uppercase tracking-[0.18em] font-heading px-3 py-1 rounded-full border-2 border-brand-black">
+                        Receipt
+                      </span>
+                      <h3 className="sc-display text-2xl uppercase text-brand-black leading-none pt-1">Promo Request</h3>
+                      <div className="h-px bg-brand-black/15" />
+                      <div className="space-y-2.5 text-[13px] font-body text-brand-black">
+                        <SummaryRow label="Category" value={selectedPromoCategory ?? ''} />
+                        <SummaryRow label="Product" value={selectedPromoProduct ?? ''} />
+                        {selectedPromoColor && <SummaryRow label="Color" value={selectedPromoColor} />}
                         <div>
-                          <span className="text-gray-500 block mb-1">Art Concept</span>
-                          <p className="text-gray-800">{promoArtConcept.length > 200 ? promoArtConcept.slice(0, 200) + '...' : promoArtConcept}</p>
+                          <span className="text-[11px] uppercase tracking-[0.18em] text-brand-black/55 block mb-1">Art Concept</span>
+                          <p className="text-brand-black">{promoArtConcept.length > 200 ? promoArtConcept.slice(0, 200) + '...' : promoArtConcept}</p>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Files</span>
-                          <span className="font-medium">{promoArtFiles.length > 0 ? `${promoArtFiles.length} file${promoArtFiles.length > 1 ? 's' : ''}` : 'None'}</span>
-                        </div>
+                        <SummaryRow label="Files" value={promoArtFiles.length > 0 ? `${promoArtFiles.length} file${promoArtFiles.length > 1 ? 's' : ''}` : 'None'} />
                       </div>
                     </div>
                     <div className="flex gap-3 mt-4">
                       <motion.button
-                        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border-2 border-brand-black sc-lift cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3 }}
@@ -1182,7 +1243,7 @@ export default function ArtRequestForm() {
                         {submitting ? 'Submitting…' : 'Submit'}
                       </motion.button>
                       <motion.button
-                        className="bg-white text-gray-700 px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border border-gray-200 hover:border-gray-400 transition-colors cursor-pointer"
+                        className="bg-white text-brand-black px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border-2 border-brand-black sc-lift cursor-pointer"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3, delay: 0.1 }}
@@ -1228,7 +1289,7 @@ export default function ArtRequestForm() {
                 </>
               )}
               {/* Talk-to-artist reply if applicable */}
-              {loc.artworkType === 'Talk to a Sunday Cool artist.' && loc.artistMessage && (
+              {loc.artworkType === 'I am not sure.' && loc.artistMessage && (
                 <UserReply text={loc.artistMessage.length > 160 ? loc.artistMessage.slice(0, 160) + '…' : loc.artistMessage} />
               )}
               {/* Creative help reply if applicable */}
@@ -1252,11 +1313,14 @@ export default function ArtRequestForm() {
                 </>
               )}
               <ChatBubble message="What ink colors would you like to use?" delay={0} />
-              <UserReply text={loc.inkColorChoice === 'match'
+              <UserReply text={(loc.inkColorChoice === 'match'
                 ? 'Match my colors as close as possible.'
                 : loc.inkColorChoice === 'pms'
-                  ? 'PMS Match.'
-                  : `Selected ${loc.selectedInkColors.length} ink color${loc.selectedInkColors.length !== 1 ? 's' : ''}`
+                  ? `PMS Match · ${loc.pmsEntries?.map((e) => e.code).join(', ') ?? ''}`
+                  : `Selected ${loc.selectedInkColors.length} ink color${loc.selectedInkColors.length !== 1 ? 's' : ''}`)
+                + (loc.selectedSpecialtyInks && loc.selectedSpecialtyInks.length > 0
+                  ? ` · +${loc.selectedSpecialtyInks.length} specialty`
+                  : '')
               } />
               <ChatBubble message="Would you like to add another print location?" delay={0} />
               <UserReply text={i < completedLocations.length - 1 || step !== 'apparel-review' ? 'Yes' : "No, I'm all set"} />
@@ -1301,25 +1365,25 @@ export default function ArtRequestForm() {
                       {PLACEMENT_OPTIONS.map((opt, i) => (
                         <motion.button
                           key={opt.title}
-                          className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:border-brand-orange hover:shadow-md transition-all cursor-pointer group"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.4, delay: i * 0.08, ease: 'easeOut' }}
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.97 }}
+                          className="bg-white rounded-2xl border-2 border-brand-black overflow-hidden cursor-pointer group sc-lift"
+                          style={{ boxShadow: '3px 3px 0 0 #1a1a1a' }}
+                          initial={{ opacity: 0, y: 20, rotate: -1 }}
+                          animate={{ opacity: 1, y: 0, rotate: 0 }}
+                          transition={{ duration: 0.45, delay: i * 0.08, ease: [0.22, 1, 0.36, 1] }}
                           onClick={() => handlePlacementSelect(opt.title)}
                         >
-                          <div className="relative aspect-square bg-gray-50">
+                          <div className="relative aspect-square bg-brand-butter">
+                            <div className="absolute inset-0 sc-dotgrid opacity-30" />
                             <Image
                               src={opt.imageSrc}
                               alt={opt.title}
                               fill
-                              className="object-contain p-2"
+                              className="object-contain p-3 transition-transform duration-300 group-hover:scale-[1.05]"
                               sizes="200px"
                             />
                           </div>
-                          <div className="px-3 py-2">
-                            <p className="text-xs font-medium text-gray-800 group-hover:text-brand-orange transition-colors text-center">
+                          <div className="px-3 py-2.5 border-t-2 border-brand-black">
+                            <p className="text-[11px] font-heading uppercase tracking-wide text-brand-black text-center">
                               {opt.title}
                             </p>
                           </div>
@@ -1357,7 +1421,7 @@ export default function ArtRequestForm() {
               )}
 
               {/* Artist message reply (talk-to-artist path) */}
-              {selectedArtworkType === 'Talk to a Sunday Cool artist.' && artistMessage && (
+              {selectedArtworkType === 'I am not sure.' && artistMessage && (
                 <UserReply text={artistMessage.length > 160 ? artistMessage.slice(0, 160) + '…' : artistMessage} />
               )}
 
@@ -1376,16 +1440,17 @@ export default function ArtRequestForm() {
                       {ARTWORK_TYPE_OPTIONS.map((opt, i) => (
                         <motion.button
                           key={opt.id}
-                          className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-5 py-4 text-left shadow-sm hover:border-brand-orange hover:shadow-md transition-all cursor-pointer group"
+                          className="flex items-center gap-4 bg-white border-2 border-brand-black rounded-2xl px-5 py-4 text-left cursor-pointer group sc-lift"
+                          style={{ boxShadow: '3px 3px 0 0 #1a1a1a' }}
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ duration: 0.4, delay: i * 0.1, ease: 'easeOut' }}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
+                          
+                          
                           onClick={() => handleArtworkTypeSelect(opt.id)}
                         >
-                          <span className="text-2xl">{opt.icon}</span>
-                          <span className="text-sm font-medium text-gray-800 group-hover:text-brand-orange transition-colors">
+                          <span className="flex-shrink-0 w-10 h-10 rounded-full bg-brand-butter border-2 border-brand-black flex items-center justify-center text-xl">{opt.icon}</span>
+                          <span className="text-[15px] font-semibold text-brand-black flex-1">
                             {opt.label}
                           </span>
                         </motion.button>
@@ -1577,11 +1642,14 @@ export default function ArtRequestForm() {
               {inkColorChoice && step !== 'ink-color' && (
                 <UserReply
                   text={
-                    inkColorChoice === 'match'
+                    (inkColorChoice === 'match'
                       ? 'Match my colors as close as possible.'
                       : inkColorChoice === 'pms'
-                        ? 'PMS Match.'
-                        : `Selected ${selectedInkColors.length} ink color${selectedInkColors.length !== 1 ? 's' : ''}`
+                        ? `PMS Match · ${pmsEntries.map((e) => e.code).join(', ')}`
+                        : `Selected ${selectedInkColors.length} ink color${selectedInkColors.length !== 1 ? 's' : ''}`)
+                    + (selectedSpecialtyInks.length > 0
+                      ? ` · +${selectedSpecialtyInks.length} specialty`
+                      : '')
                   }
                 />
               )}
@@ -1601,16 +1669,17 @@ export default function ArtRequestForm() {
                       {INK_COLOR_CHOICE_OPTIONS.map((opt, i) => (
                         <motion.button
                           key={opt.id}
-                          className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-5 py-4 text-left shadow-sm hover:border-brand-orange hover:shadow-md transition-all cursor-pointer group"
+                          className="flex items-center gap-4 bg-white border-2 border-brand-black rounded-2xl px-5 py-4 text-left cursor-pointer group sc-lift"
+                          style={{ boxShadow: '3px 3px 0 0 #1a1a1a' }}
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ duration: 0.4, delay: i * 0.1, ease: 'easeOut' }}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
+                          
+                          
                           onClick={() => handleInkColorChoice(opt.id as InkColorChoice)}
                         >
-                          <span className="text-2xl">{opt.icon}</span>
-                          <span className="text-sm font-medium text-gray-800 group-hover:text-brand-orange transition-colors">
+                          <span className="flex-shrink-0 w-10 h-10 rounded-full bg-brand-butter border-2 border-brand-black flex items-center justify-center text-xl">{opt.icon}</span>
+                          <span className="text-[15px] font-semibold text-brand-black flex-1">
                             {opt.label}
                           </span>
                         </motion.button>
@@ -1628,12 +1697,76 @@ export default function ArtRequestForm() {
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.3 }}
                 >
-                  <InkColorPicker
+                  <InkColorGrid
                     colors={INK_COLORS}
                     selected={selectedInkColors}
                     onToggle={handleInkColorToggle}
-                    onContinue={handleInkColorContinue}
                   />
+                </motion.div>
+              )}
+
+              {/* PMS entries chips (after PMS chosen + saved) */}
+              {step === 'ink-color' && inkColorChoice === 'pms' && pmsEntries.length > 0 && !pmsModalOpen && (
+                <motion.div
+                  className="px-4 pl-15"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <div className="max-w-lg flex flex-wrap items-center gap-2">
+                    {pmsEntries.map((e) => (
+                      <span
+                        key={e.code}
+                        className="inline-flex items-center gap-2 bg-white border-2 border-brand-black rounded-full pl-1.5 pr-3 py-1"
+                        style={{ boxShadow: '2px 2px 0 0 #1a1a1a' }}
+                      >
+                        <span
+                          className="w-5 h-5 rounded-full border-2 border-brand-black flex-shrink-0 flex items-center justify-center"
+                          style={{ backgroundColor: e.hex ?? '#fff' }}
+                        >
+                          {!e.hex && <span className="text-[8px] font-heading text-brand-black/50">?</span>}
+                        </span>
+                        <span className="text-[12px] font-semibold text-brand-black">{e.code}</span>
+                      </span>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setPmsModalOpen(true)}
+                      className="text-[11px] uppercase tracking-[0.18em] font-heading text-brand-black/70 hover:text-brand-black underline underline-offset-4"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Specialty inks + Continue (after a choice has been made) */}
+              {step === 'ink-color' && inkColorChoice && !pmsModalOpen && (
+                <motion.div
+                  className="px-4 pl-15"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                >
+                  <div className="max-w-lg">
+                    <SpecialtyInksPicker
+                      value={selectedSpecialtyInks}
+                      onChange={setSelectedSpecialtyInks}
+                    />
+                    <motion.button
+                      className="mt-5 bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border-2 border-brand-black sc-lift cursor-pointer disabled:cursor-not-allowed"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3, delay: 0.1 }}
+                      onClick={handleInkColorContinue}
+                      disabled={
+                        (inkColorChoice === 'select' && selectedInkColors.length === 0) ||
+                        (inkColorChoice === 'pms' && pmsEntries.length === 0)
+                      }
+                    >
+                      Continue →
+                    </motion.button>
+                  </div>
                 </motion.div>
               )}
             </>
@@ -1668,16 +1801,17 @@ export default function ArtRequestForm() {
                       {ADD_LOCATION_OPTIONS.map((opt, i) => (
                         <motion.button
                           key={opt.id}
-                          className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-5 py-4 text-left shadow-sm hover:border-brand-orange hover:shadow-md transition-all cursor-pointer group"
+                          className="flex items-center gap-4 bg-white border-2 border-brand-black rounded-2xl px-5 py-4 text-left cursor-pointer group sc-lift"
+                          style={{ boxShadow: '3px 3px 0 0 #1a1a1a' }}
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ duration: 0.4, delay: i * 0.1, ease: 'easeOut' }}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
+                          
+                          
                           onClick={() => handleAddLocationChoice(opt.id === 'yes')}
                         >
-                          <span className="text-2xl">{opt.icon}</span>
-                          <span className="text-sm font-medium text-gray-800 group-hover:text-brand-orange transition-colors">
+                          <span className="flex-shrink-0 w-10 h-10 rounded-full bg-brand-butter border-2 border-brand-black flex items-center justify-center text-xl">{opt.icon}</span>
+                          <span className="text-[15px] font-semibold text-brand-black flex-1">
                             {opt.label}
                           </span>
                         </motion.button>
@@ -1727,10 +1861,11 @@ export default function ArtRequestForm() {
                       onChange={(e) => setAdditionalComments(e.target.value)}
                       placeholder="Anything else we should know about this art request?"
                       rows={4}
-                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-brand-orange resize-none"
+                      className="w-full bg-white border-2 border-brand-black rounded-2xl px-4 py-3 text-[14px] text-brand-black placeholder:text-brand-black/40 focus:outline-none focus:ring-4 focus:ring-brand-orange/30 resize-none"
+                      style={{ boxShadow: '3px 3px 0 0 #1a1a1a' }}
                     />
                     <button
-                      className="mt-3 bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors"
+                      className="mt-3 bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border-2 border-brand-black sc-lift"
                       onClick={handleAdditionalCommentsContinue}
                     >
                       Continue
@@ -1764,67 +1899,63 @@ export default function ArtRequestForm() {
                     exit={{ opacity: 0, transition: { duration: 0.2 } }}
                     transition={{ duration: 0.3 }}
                   >
-                    <div className="max-w-md bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
-                      <h3 className="text-sm font-heading uppercase tracking-wide text-brand-black">Apparel Request Summary</h3>
-                      <div className="space-y-2 text-sm font-body text-gray-700">
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Product</span>
-                          <span className="font-medium">{selectedProduct}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Sizing</span>
-                          <span className="font-medium">{SIZING_OPTIONS.find((o) => o.id === selectedSizing)?.label ?? selectedSizing}</span>
-                        </div>
-                        {selectedApparelColor && (
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Color</span>
-                            <span className="font-medium">{selectedApparelColor}</span>
-                          </div>
-                        )}
+                    <div
+                      className="relative max-w-md bg-white rounded-3xl border-2 border-brand-black p-6 space-y-4"
+                      style={{ boxShadow: '5px 5px 0 0 #1a1a1a' }}
+                    >
+                      <span className="absolute -top-3 left-5 inline-flex items-center gap-1.5 bg-brand-yellow text-brand-black text-[10px] uppercase tracking-[0.18em] font-heading px-3 py-1 rounded-full border-2 border-brand-black">
+                        Receipt
+                      </span>
+                      <h3 className="sc-display text-2xl uppercase text-brand-black leading-none pt-1">Apparel Request</h3>
+                      <div className="h-px bg-brand-black/15" />
+                      <div className="space-y-2.5 text-[13px] font-body text-brand-black">
+                        <SummaryRow label="Product" value={selectedProduct ?? ''} />
+                        <SummaryRow label="Sizing" value={SIZING_OPTIONS.find((o) => o.id === selectedSizing)?.label ?? selectedSizing ?? ''} />
+                        {selectedApparelColor && <SummaryRow label="Color" value={selectedApparelColor} />}
                       </div>
 
                       {completedLocations.length > 0 && (
-                        <div className="border-t border-gray-100 pt-3 space-y-3">
-                          <h4 className="text-xs font-heading uppercase tracking-wide text-gray-500">
-                            Print Locations ({completedLocations.length})
+                        <div className="border-t-2 border-dashed border-brand-black/20 pt-4 space-y-3">
+                          <h4 className="text-[11px] font-heading uppercase tracking-[0.18em] text-brand-black/60">
+                            Print Locations · {completedLocations.length}
                           </h4>
                           {completedLocations.map((loc, i) => (
-                            <div key={i} className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-sm">
+                            <div key={i} className="bg-brand-butter/40 border-2 border-brand-black/20 rounded-2xl p-3.5 space-y-1.5 text-sm">
                               <div className="flex justify-between">
-                                <span className="text-gray-500">Placement</span>
-                                <span className="font-medium text-gray-800">{loc.placement}</span>
+                                <span className="text-[10px] uppercase tracking-[0.18em] text-brand-black/55 font-heading">Placement</span>
+                                <span className="font-semibold text-brand-black">{loc.placement}</span>
                               </div>
                               <div className="flex justify-between">
-                                <span className="text-gray-500">Artwork</span>
-                                <span className="font-medium text-gray-800">{loc.artworkType}</span>
+                                <span className="text-[10px] uppercase tracking-[0.18em] text-brand-black/55 font-heading">Artwork</span>
+                                <span className="font-semibold text-brand-black">{loc.artworkType}</span>
                               </div>
                               {loc.selectedDesign && (
                                 <div className="flex justify-between">
-                                  <span className="text-gray-500">Template</span>
-                                  <span className="font-medium text-gray-800">{loc.selectedDesign.name}</span>
+                                  <span className="text-[10px] uppercase tracking-[0.18em] text-brand-black/55 font-heading">Template</span>
+                                  <span className="font-semibold text-brand-black">{loc.selectedDesign.name}</span>
                                 </div>
                               )}
                               {loc.uploadedFiles.length > 0 && (
                                 <div className="flex justify-between">
-                                  <span className="text-gray-500">Files</span>
-                                  <span className="font-medium text-gray-800">{loc.uploadedFiles.length} file{loc.uploadedFiles.length > 1 ? 's' : ''}</span>
+                                  <span className="text-[10px] uppercase tracking-[0.18em] text-brand-black/55 font-heading">Files</span>
+                                  <span className="font-semibold text-brand-black">{loc.uploadedFiles.length} file{loc.uploadedFiles.length > 1 ? 's' : ''}</span>
                                 </div>
                               )}
                               {loc.artworkDetails && (
                                 <div>
-                                  <span className="text-gray-500 block">Details</span>
-                                  <p className="text-gray-800">{loc.artworkDetails.length > 100 ? loc.artworkDetails.slice(0, 100) + '...' : loc.artworkDetails}</p>
+                                  <span className="text-[10px] uppercase tracking-[0.18em] text-brand-black/55 font-heading block mb-0.5">Details</span>
+                                  <p className="text-brand-black">{loc.artworkDetails.length > 100 ? loc.artworkDetails.slice(0, 100) + '...' : loc.artworkDetails}</p>
                                 </div>
                               )}
                               {loc.creativeData && (
                                 <div className="flex justify-between">
-                                  <span className="text-gray-500">Style</span>
-                                  <span className="font-medium text-gray-800">{loc.creativeData.designStyles.join(', ')}</span>
+                                  <span className="text-[10px] uppercase tracking-[0.18em] text-brand-black/55 font-heading">Style</span>
+                                  <span className="font-semibold text-brand-black">{loc.creativeData.designStyles.join(', ')}</span>
                                 </div>
                               )}
                               <div className="flex justify-between">
-                                <span className="text-gray-500">Ink Colors</span>
-                                <span className="font-medium text-gray-800">
+                                <span className="text-[10px] uppercase tracking-[0.18em] text-brand-black/55 font-heading">Ink</span>
+                                <span className="font-semibold text-brand-black">
                                   {loc.inkColorChoice === 'match'
                                     ? 'Match colors'
                                     : loc.inkColorChoice === 'pms'
@@ -1832,6 +1963,18 @@ export default function ArtRequestForm() {
                                       : `${loc.selectedInkColors.length} selected`}
                                 </span>
                               </div>
+                              {loc.inkColorChoice === 'pms' && loc.pmsEntries && loc.pmsEntries.length > 0 && (
+                                <div className="flex justify-between gap-3">
+                                  <span className="text-[10px] uppercase tracking-[0.18em] text-brand-black/55 font-heading flex-shrink-0">PMS</span>
+                                  <span className="font-semibold text-brand-black text-right">{loc.pmsEntries.map((e) => e.code).join(', ')}</span>
+                                </div>
+                              )}
+                              {loc.selectedSpecialtyInks && loc.selectedSpecialtyInks.length > 0 && (
+                                <div className="flex justify-between gap-3">
+                                  <span className="text-[10px] uppercase tracking-[0.18em] text-brand-black/55 font-heading flex-shrink-0">Specialty</span>
+                                  <span className="font-semibold text-brand-black text-right">{loc.selectedSpecialtyInks.join(', ')}</span>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1839,7 +1982,7 @@ export default function ArtRequestForm() {
                     </div>
                     <div className="flex gap-3 mt-4">
                       <motion.button
-                        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border-2 border-brand-black sc-lift cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3 }}
@@ -1849,7 +1992,7 @@ export default function ArtRequestForm() {
                         {submitting ? 'Submitting…' : 'Submit'}
                       </motion.button>
                       <motion.button
-                        className="bg-white text-gray-700 px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border border-gray-200 hover:border-gray-400 transition-colors cursor-pointer"
+                        className="bg-white text-brand-black px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border-2 border-brand-black sc-lift cursor-pointer"
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.3, delay: 0.1 }}
@@ -1872,6 +2015,21 @@ export default function ArtRequestForm() {
             <>
               <ChatBubble message="Your art request has been submitted! 🎉" delay={0} />
               <ChatBubble message="A Sunday Cool artist will be in touch soon. You can close this window." delay={0.4} />
+              <motion.div
+                className="px-4 pl-15 pt-4"
+                initial={{ opacity: 0, y: 16, rotate: -1.5 }}
+                animate={{ opacity: 1, y: 0, rotate: -2 }}
+                transition={{ duration: 0.7, delay: 0.9, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <div
+                  className="inline-block bg-brand-orange border-2 border-brand-black rounded-3xl px-6 py-5 max-w-sm"
+                  style={{ boxShadow: '5px 5px 0 0 #1a1a1a' }}
+                >
+                  <p className="text-[10px] uppercase tracking-[0.22em] font-heading text-brand-black/70 mb-1">Stamp of approval</p>
+                  <p className="sc-display text-2xl uppercase text-brand-black leading-none">All wrapped up.</p>
+                  <p className="text-sm text-brand-black/80 mt-2">Catch you on the next one. ✌️</p>
+                </div>
+              </motion.div>
             </>
           )}
 
@@ -1890,6 +2048,22 @@ export default function ArtRequestForm() {
         apparelProduct={selectedProduct ?? ''}
       />
 
+      {/* PMS Match modal */}
+      <PMSColorModal
+        open={pmsModalOpen}
+        initialEntries={pmsEntries}
+        onClose={() => {
+          setPmsModalOpen(false);
+          // If they backed out without saving any entries, let them re-pick.
+          if (pmsEntries.length === 0 && inkColorChoice === 'pms') {
+            setInkColorChoice(null);
+          }
+        }}
+        onSave={(entries) => {
+          setPmsEntries(entries);
+        }}
+      />
+
       {/* Talk-to-artist modal */}
       <AnimatePresence>
         {talkToArtistOpen && (
@@ -1902,40 +2076,63 @@ export default function ArtRequestForm() {
             onClick={handleArtistCancel}
           >
             <motion.div
-              className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6"
-              initial={{ opacity: 0, scale: 0.96, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 10 }}
-              transition={{ duration: 0.2 }}
+              className="relative bg-brand-daylight rounded-3xl max-w-lg w-full p-7 border-2 border-brand-black"
+              style={{ boxShadow: '6px 6px 0 0 #1a1a1a' }}
+              initial={{ opacity: 0, scale: 0.94, y: 14, rotate: -1 }}
+              animate={{ opacity: 1, scale: 1, y: 0, rotate: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 10 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 24 }}
               onClick={(e) => e.stopPropagation()}
             >
-              <h2 className="text-lg font-heading uppercase tracking-wide text-brand-black mb-1">
-                Talk to a Sunday Cool artist
+              <span className="absolute -top-3 -left-3 inline-flex items-center gap-1.5 bg-brand-orange text-brand-black text-[10px] uppercase tracking-[0.18em] font-heading px-3 py-1 rounded-full border-2 border-brand-black">
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-black" /> Direct line
+              </span>
+
+              <h2 className="sc-display text-3xl uppercase text-brand-black mb-1.5 leading-none">
+                I'm not sure <span className="text-brand-orange">yet</span>
               </h2>
-              <p className="text-sm text-gray-500 mb-4">
-                Tell us what you have in mind. An artist will follow up to walk through your project.
+              <p className="text-sm text-brand-black/65 mb-5 max-w-sm">
+                Tell us what you have in mind — an artist will follow up to walk through your project.
               </p>
+
               <textarea
                 value={artistDraft}
                 onChange={(e) => setArtistDraft(e.target.value)}
                 placeholder="Describe your project, vibe, references, deadlines, or any questions…"
                 rows={6}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 focus:outline-none focus:border-brand-orange resize-none"
+                className="w-full bg-white border-2 border-brand-black rounded-2xl px-4 py-3 text-[14px] text-brand-black placeholder:text-brand-black/40 focus:outline-none focus:ring-4 focus:ring-brand-orange/30 resize-none"
                 autoFocus
               />
-              <div className="flex justify-end gap-3 mt-5">
+
+              <div className="mt-5">
+                <p className="text-[11px] font-heading uppercase tracking-[0.18em] text-brand-black/60 mb-2">
+                  Attach references <span className="text-brand-black/40 normal-case tracking-normal">(optional)</span>
+                </p>
+                <FileUploadZone
+                  files={uploadedFiles}
+                  onFilesChange={setUploadedFiles}
+                  onContinue={() => {}}
+                  showContinueButton={false}
+                  sessionId={sessionIdRef.current}
+                  folder={`location-${completedLocations.length + 1}/artist-references`}
+                  onUploadedPathsChange={setUploadedFilePaths}
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
                 <button
-                  className="px-5 py-2.5 rounded-full text-sm font-heading uppercase tracking-wide text-gray-700 border border-gray-200 hover:border-gray-400 transition-colors"
+                  className="px-5 py-2.5 rounded-full text-sm font-heading uppercase tracking-wide text-brand-black/70 hover:text-brand-black border-2 border-transparent hover:border-brand-black transition-colors"
                   onClick={handleArtistCancel}
                 >
                   Cancel
                 </button>
                 <button
-                  className="px-5 py-2.5 rounded-full text-sm font-heading uppercase tracking-wide bg-brand-black text-white hover:bg-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="px-6 py-2.5 rounded-full text-sm font-heading uppercase tracking-wide bg-brand-black text-white border-2 border-brand-black sc-lift disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0"
+                  style={{ boxShadow: '3px 3px 0 0 #f6912d' }}
                   onClick={handleArtistSubmit}
                   disabled={artistDraft.trim().length === 0}
                 >
-                  Submit
+                  Send →
                 </button>
               </div>
             </motion.div>
@@ -1948,16 +2145,31 @@ export default function ArtRequestForm() {
 
 // -- Small helper components --
 
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between items-baseline gap-3">
+      <span className="text-[11px] uppercase tracking-[0.18em] text-brand-black/55 font-heading">{label}</span>
+      <span className="font-semibold text-brand-black text-right">{value}</span>
+    </div>
+  );
+}
+
 function UserReply({ text }: { text: string }) {
   return (
     <motion.div
       className="flex justify-end px-4"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
+      initial={{ opacity: 0, y: 10, rotate: 1 }}
+      animate={{ opacity: 1, y: 0, rotate: 0 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div className="bg-brand-black text-white rounded-2xl rounded-tr-sm px-4 py-3 shadow-sm max-w-xs">
-        <p className="text-sm font-body">{text}</p>
+      <div
+        className="bg-brand-black text-white px-5 py-3 max-w-xs border-2 border-brand-black"
+        style={{
+          borderRadius: '22px 22px 6px 22px',
+          boxShadow: '-3px 3px 0 0 #f6912d',
+        }}
+      >
+        <p className="text-[14px] font-body leading-snug">{text}</p>
       </div>
     </motion.div>
   );
@@ -1971,19 +2183,28 @@ function DesignCard({ design }: { design: Design }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
     >
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden max-w-sm">
-        <div className="relative aspect-square bg-gray-50">
+      <div
+        className="bg-white rounded-2xl border-2 border-brand-black overflow-hidden max-w-sm"
+        style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
+      >
+        <div className="relative aspect-square bg-brand-butter">
+          <div className="absolute inset-0 sc-dotgrid opacity-30" />
           <Image
             src={design.thumbnail_url}
             alt={design.name}
             fill
-            className="object-contain p-3"
+            className="object-contain p-4"
             sizes="300px"
           />
         </div>
-        <div className="px-4 py-3">
-          <p className="text-sm font-semibold text-gray-900">{design.name}</p>
-          <p className="text-xs text-gray-500 mt-0.5">{design.design_id}</p>
+        <div className="px-4 py-3 border-t-2 border-brand-black flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-heading uppercase tracking-wide text-brand-black truncate">{design.name}</p>
+            <p className="text-[10px] text-brand-black/55 mt-0.5 font-mono">{design.design_id}</p>
+          </div>
+          <span className="text-[10px] uppercase tracking-[0.18em] bg-brand-orange text-brand-black border-2 border-brand-black rounded-full px-2 py-0.5 font-heading flex-shrink-0">
+            Picked
+          </span>
         </div>
       </div>
     </motion.div>
@@ -2018,41 +2239,38 @@ function ArtworkDetailsInput({
   return (
     <div className="max-w-md space-y-3">
       <textarea
-        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-body text-gray-800 bg-white shadow-sm focus:outline-none focus:border-brand-orange focus:ring-1 focus:ring-brand-orange resize-none"
+        className="w-full bg-white border-2 border-brand-black rounded-2xl px-4 py-3 text-[14px] font-body text-brand-black placeholder:text-brand-black/40 focus:outline-none focus:ring-4 focus:ring-brand-orange/30 resize-none"
+        style={{ boxShadow: '3px 3px 0 0 #1a1a1a' }}
         rows={4}
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
       <motion.button
-        className={`bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide transition-colors ${
-          value.trim() ? 'hover:bg-black cursor-pointer' : 'opacity-50 cursor-not-allowed'
-        }`}
+        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border-2 border-brand-black sc-lift cursor-pointer disabled:cursor-not-allowed"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
         disabled={!value.trim()}
         onClick={onSubmit}
       >
-        Continue
+        Continue →
       </motion.button>
     </div>
   );
 }
 
-function InkColorPicker({
+function InkColorGrid({
   colors,
   selected,
   onToggle,
-  onContinue,
 }: {
   colors: string[];
   selected: string[];
   onToggle: (hex: string) => void;
-  onContinue: () => void;
 }) {
   return (
-    <div className="max-w-lg space-y-4">
+    <div className="max-w-lg space-y-3">
       <div className="flex flex-wrap gap-2">
         {colors.map((hex, i) => {
           const isSelected = selected.includes(hex);
@@ -2060,22 +2278,23 @@ function InkColorPicker({
           return (
             <motion.button
               key={`${hex}-${i}`}
-              className={`w-9 h-9 rounded-full border-2 transition-all cursor-pointer flex items-center justify-center ${
-                isSelected
-                  ? 'border-brand-black shadow-md scale-110'
-                  : 'border-gray-200 hover:border-gray-400'
+              className={`w-10 h-10 rounded-full border-2 border-brand-black transition-all cursor-pointer flex items-center justify-center ${
+                isSelected ? 'ring-4 ring-brand-orange ring-offset-2 ring-offset-brand-daylight' : ''
               }`}
-              style={{ backgroundColor: hex }}
+              style={{
+                backgroundColor: hex,
+                boxShadow: isSelected ? '2px 2px 0 0 #1a1a1a' : '1px 1px 0 0 #1a1a1a',
+              }}
               initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: isSelected ? 1.1 : 1 }}
+              animate={{ opacity: 1, scale: isSelected ? 1.05 : 1 }}
               transition={{ duration: 0.2, delay: i * 0.008 }}
-              whileHover={{ scale: 1.15 }}
+              whileHover={{ scale: 1.12 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => onToggle(hex)}
               title={hex}
             >
               {isSelected && (
-                <span className={`text-xs font-bold ${isLight ? 'text-gray-800' : 'text-white'}`}>
+                <span className={`text-[11px] font-bold ${isLight ? 'text-brand-black' : 'text-white'}`}>
                   ✓
                 </span>
               )}
@@ -2084,20 +2303,9 @@ function InkColorPicker({
         })}
       </div>
       {selected.length > 0 && (
-        <div className="flex items-center gap-3">
-          <motion.button
-            className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors cursor-pointer"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-            onClick={onContinue}
-          >
-            Continue
-          </motion.button>
-          <span className="text-xs text-gray-500">
-            {selected.length} color{selected.length !== 1 ? 's' : ''} selected
-          </span>
-        </div>
+        <span className="text-[11px] uppercase tracking-[0.18em] text-brand-black/60 font-heading">
+          {selected.length} color{selected.length !== 1 ? 's' : ''} selected
+        </span>
       )}
     </div>
   );
@@ -2196,10 +2404,10 @@ function FileUploadZone({
     <div className="max-w-md space-y-3">
       {/* Drop zone */}
       <div
-        className={`relative border-2 border-dashed rounded-xl px-6 py-8 text-center transition-colors cursor-pointer ${
+        className={`relative border-2 border-dashed rounded-2xl px-6 py-8 text-center cursor-pointer transition-all ${
           isDragging
-            ? 'border-brand-orange bg-orange-50'
-            : 'border-gray-300 bg-white hover:border-gray-400'
+            ? 'border-brand-orange bg-brand-butter scale-[1.01]'
+            : 'border-brand-black/40 bg-white hover:border-brand-black hover:bg-brand-butter/40'
         }`}
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
@@ -2218,12 +2426,14 @@ function FileUploadZone({
           className="hidden"
           onChange={(e) => addFiles(e.target.files)}
         />
-        <div className="text-3xl mb-2">📂</div>
-        <p className="text-sm font-medium text-gray-700">
-          Drag & drop your files here
+        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-brand-butter border-2 border-brand-black mb-3 text-xl">
+          ↑
+        </div>
+        <p className="text-sm font-heading uppercase tracking-wide text-brand-black">
+          Drag & drop your files
         </p>
-        <p className="text-xs text-gray-500 mt-1">
-          or click to browse &middot; Images, PDF, AI, EPS, SVG
+        <p className="text-[11px] text-brand-black/55 mt-1 font-body">
+          or click to browse · Images, PDF, AI, EPS, SVG
         </p>
       </div>
 
@@ -2233,38 +2443,52 @@ function FileUploadZone({
           {files.map((file, i) => {
             const entry = uploads.get(file);
             return (
-              <div
+              <motion.div
                 key={`${file.name}-${i}`}
-                className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2"
+                className="flex items-center gap-3 bg-white border-2 border-brand-black rounded-xl px-3 py-2"
+                style={{ boxShadow: '2px 2px 0 0 #1a1a1a' }}
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.25 }}
               >
                 {file.type.startsWith('image/') ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={URL.createObjectURL(file)}
                     alt={file.name}
-                    className="w-10 h-10 rounded object-cover flex-shrink-0"
+                    className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border-2 border-brand-black"
                   />
                 ) : (
-                  <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                    <span className="text-lg">📄</span>
+                  <div className="w-10 h-10 rounded-lg bg-brand-butter border-2 border-brand-black flex items-center justify-center flex-shrink-0">
+                    <span className="text-base">📄</span>
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-800 truncate">{file.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {(file.size / 1024).toFixed(0)} KB
-                    {entry?.status === 'uploading' && ' · Uploading…'}
-                    {entry?.status === 'done' && ' · ✓ Uploaded'}
-                    {entry?.status === 'error' && ` · ✗ ${entry.error ?? 'Upload failed'}`}
+                  <p className="text-[13px] font-semibold text-brand-black truncate">{file.name}</p>
+                  <p className="text-[11px] text-brand-black/55 flex items-center gap-1.5">
+                    <span>{(file.size / 1024).toFixed(0)} KB</span>
+                    {entry?.status === 'uploading' && (
+                      <span className="inline-flex items-center gap-1 text-brand-orange">
+                        <span className="w-1.5 h-1.5 rounded-full bg-brand-orange animate-pulse" />
+                        Uploading
+                      </span>
+                    )}
+                    {entry?.status === 'done' && (
+                      <span className="text-brand-black/70">· ✓ Uploaded</span>
+                    )}
+                    {entry?.status === 'error' && (
+                      <span className="text-brand-pink">· ✗ {entry.error ?? 'Failed'}</span>
+                    )}
                   </p>
                 </div>
                 <button
-                  className="text-gray-400 hover:text-red-500 transition-colors text-lg flex-shrink-0"
+                  className="w-7 h-7 rounded-full bg-white border-2 border-brand-black flex items-center justify-center text-brand-black hover:bg-brand-pink hover:text-white transition-colors text-sm flex-shrink-0"
                   onClick={(e) => { e.stopPropagation(); removeFile(i); }}
+                  aria-label="Remove file"
                 >
-                  &times;
+                  ×
                 </button>
-              </div>
+              </motion.div>
             );
           })}
         </div>
@@ -2273,7 +2497,7 @@ function FileUploadZone({
       {/* Continue button */}
       {showContinueButton && files.length > 0 && (
         <motion.button
-          className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border-2 border-brand-black sc-lift disabled:opacity-50 disabled:cursor-not-allowed"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
@@ -2325,7 +2549,7 @@ function TemplateDetailsForm({
           <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">Headline</span>
           <input
             type="text"
-            className="mt-1 w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-body text-gray-800 bg-white shadow-sm focus:outline-none focus:border-brand-orange focus:ring-1 focus:ring-brand-orange"
+            className="mt-1.5 w-full border-2 border-brand-black rounded-2xl px-4 py-3 text-[14px] font-body text-brand-black placeholder:text-brand-black/40 bg-white focus:outline-none focus:ring-4 focus:ring-brand-orange/30"
             placeholder="e.g. VBS 2025, Fall Retreat"
             value={headline}
             onChange={(e) => onHeadlineChange(e.target.value)}
@@ -2335,7 +2559,7 @@ function TemplateDetailsForm({
           <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">Group / Church Name</span>
           <input
             type="text"
-            className="mt-1 w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-body text-gray-800 bg-white shadow-sm focus:outline-none focus:border-brand-orange focus:ring-1 focus:ring-brand-orange"
+            className="mt-1.5 w-full border-2 border-brand-black rounded-2xl px-4 py-3 text-[14px] font-body text-brand-black placeholder:text-brand-black/40 bg-white focus:outline-none focus:ring-4 focus:ring-brand-orange/30"
             placeholder="e.g. Grace Community Church"
             value={groupName}
             onChange={(e) => onGroupNameChange(e.target.value)}
@@ -2345,7 +2569,7 @@ function TemplateDetailsForm({
           <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">Verse Reference</span>
           <input
             type="text"
-            className="mt-1 w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-body text-gray-800 bg-white shadow-sm focus:outline-none focus:border-brand-orange focus:ring-1 focus:ring-brand-orange"
+            className="mt-1.5 w-full border-2 border-brand-black rounded-2xl px-4 py-3 text-[14px] font-body text-brand-black placeholder:text-brand-black/40 bg-white focus:outline-none focus:ring-4 focus:ring-brand-orange/30"
             placeholder="e.g. John 3:16"
             value={verseRef}
             onChange={(e) => onVerseRefChange(e.target.value)}
@@ -2356,7 +2580,7 @@ function TemplateDetailsForm({
       <label className="block">
         <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">Describe any changes</span>
         <textarea
-          className="mt-1 w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-body text-gray-800 bg-white shadow-sm focus:outline-none focus:border-brand-orange focus:ring-1 focus:ring-brand-orange resize-none"
+          className="mt-1.5 w-full border-2 border-brand-black rounded-2xl px-4 py-3 text-[14px] font-body text-brand-black placeholder:text-brand-black/40 bg-white focus:outline-none focus:ring-4 focus:ring-brand-orange/30 resize-none"
           rows={3}
           placeholder="Please describe any changes you are looking for..."
           value={changeDescription}
@@ -2380,7 +2604,7 @@ function TemplateDetailsForm({
       </div>
 
       <motion.button
-        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide hover:bg-black transition-colors cursor-pointer"
+        className="bg-brand-black text-white px-6 py-3 rounded-full text-sm font-heading uppercase tracking-wide border-2 border-brand-black sc-lift cursor-pointer"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}

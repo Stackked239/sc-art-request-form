@@ -2,7 +2,145 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --sc-cream: #fffdf0;
+  --sc-butter: #ffeec6;
+  --sc-orange: #f6912d;
+  --sc-blue: #53cfdd;
+  --sc-yellow: #fddd00;
+  --sc-pink: #e96a6a;
+  --sc-ink: #1a1a1a;
+
+  --sc-shadow-sticker: 4px 4px 0 0 var(--sc-ink);
+  --sc-shadow-sticker-sm: 2px 2px 0 0 var(--sc-ink);
+  --sc-shadow-sticker-lg: 6px 6px 0 0 var(--sc-ink);
+}
+
+html, body {
+  background-color: var(--sc-cream);
+  color: var(--sc-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
 body {
-  background-color: #fffdf0;
-  color: #1a1a1a;
+  position: relative;
+  background-image:
+    radial-gradient(at 8% 12%, rgba(246, 145, 45, 0.18) 0px, transparent 42%),
+    radial-gradient(at 92% 6%, rgba(83, 207, 221, 0.16) 0px, transparent 40%),
+    radial-gradient(at 78% 88%, rgba(233, 106, 106, 0.13) 0px, transparent 44%),
+    radial-gradient(at 18% 92%, rgba(253, 221, 0, 0.14) 0px, transparent 42%);
+  background-attachment: fixed;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.10 0 0 0 0 0.10 0 0 0 0 0.10 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  opacity: 0.06;
+  mix-blend-mode: multiply;
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+::selection {
+  background: var(--sc-orange);
+  color: var(--sc-cream);
+}
+
+/* Custom dotted grid utility */
+.sc-dotgrid {
+  background-image: radial-gradient(rgba(26, 26, 26, 0.08) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* Sticker shadow utilities */
+.sc-shadow {
+  box-shadow: var(--sc-shadow-sticker);
+}
+.sc-shadow-sm {
+  box-shadow: var(--sc-shadow-sticker-sm);
+}
+.sc-shadow-lg {
+  box-shadow: var(--sc-shadow-sticker-lg);
+}
+.sc-shadow-orange {
+  box-shadow: 4px 4px 0 0 var(--sc-orange);
+}
+.sc-shadow-blue {
+  box-shadow: 4px 4px 0 0 var(--sc-blue);
+}
+.sc-shadow-pink {
+  box-shadow: 4px 4px 0 0 var(--sc-pink);
+}
+
+/* Hover lift used on sticker buttons */
+.sc-lift {
+  box-shadow: 3px 3px 0 0 var(--sc-ink);
+  transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  will-change: transform;
+}
+.sc-lift:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 0 var(--sc-ink);
+}
+.sc-lift:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 0 var(--sc-ink);
+}
+.sc-lift:disabled,
+.sc-lift[disabled] {
+  transform: none;
+  box-shadow: 2px 2px 0 0 var(--sc-ink);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Display heading utility — Passion One looks better with subtle letter tightening */
+.sc-display {
+  font-family: var(--font-passion-one), sans-serif;
+  letter-spacing: 0.01em;
+  line-height: 0.95;
+}
+
+/* Subtle wobble for the avatar — gives the SC badge real character */
+@keyframes sc-wobble {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+.sc-wobble {
+  animation: sc-wobble 6s ease-in-out infinite;
+}
+
+/* Marquee-friendly underline */
+.sc-underline {
+  background-image: linear-gradient(transparent 60%, rgba(246, 145, 45, 0.45) 60%);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  padding: 0 0.1em;
+}
+
+/* Custom scrollbar to match brand */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--sc-cream);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--sc-ink);
+  border: 2px solid var(--sc-cream);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sc-orange);
 }

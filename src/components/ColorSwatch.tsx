@@ -11,35 +11,31 @@ interface ColorSwatchProps {
 
 export default function ColorSwatch({ name, hex, delay = 0, onClick }: ColorSwatchProps) {
   const displayHex = hex || '#CCCCCC';
-  const isLight =
-    displayHex.toUpperCase() === '#F9F9F9' ||
-    displayHex.toUpperCase() === '#FFFFFF' ||
-    displayHex.toUpperCase() === '#E3D3C1' ||
-    displayHex.toUpperCase() === '#DDD5D1' ||
-    displayHex.toUpperCase() === '#DFD2B1' ||
-    displayHex.toUpperCase() === '#FFFF00' ||
-    displayHex.toUpperCase() === '#E7F967' ||
-    displayHex.toUpperCase() === '#D4FC7E' ||
-    displayHex.toUpperCase() === '#C5DF5C' ||
-    displayHex.toUpperCase() === '#B6F2B6' ||
-    displayHex.toUpperCase() === '#FDDD00' ||
-    luminance(displayHex) > 0.5;
+  const isLight = luminance(displayHex) > 0.78;
 
   return (
     <motion.button
-      className="flex flex-col items-center gap-2 group cursor-pointer"
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.3, delay, ease: 'easeOut' }}
-      whileHover={{ scale: 1.1 }}
-      whileTap={{ scale: 0.95 }}
+      className="flex flex-col items-center gap-2 group cursor-pointer w-[78px]"
+      initial={{ opacity: 0, scale: 0.7, y: 8 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      transition={{ duration: 0.4, delay, ease: [0.22, 1, 0.36, 1] }}
+      whileHover={{ y: -3 }}
+      whileTap={{ scale: 0.92 }}
       onClick={onClick}
     >
-      <div
-        className={`w-12 h-12 rounded-full shadow-md transition-shadow group-hover:shadow-lg group-hover:ring-2 group-hover:ring-brand-orange group-hover:ring-offset-2 ${isLight ? 'border border-gray-200' : ''}`}
-        style={{ backgroundColor: displayHex }}
-      />
-      <span className="text-xs text-gray-600 text-center max-w-[80px] leading-tight">
+      <div className="relative">
+        <div
+          className={`w-14 h-14 rounded-full transition-all duration-200 ${
+            isLight ? 'border-2 border-brand-black' : 'border-2 border-brand-black/0'
+          } group-hover:ring-4 group-hover:ring-brand-orange group-hover:ring-offset-2 group-hover:ring-offset-brand-daylight`}
+          style={{
+            backgroundColor: displayHex,
+            boxShadow: '2px 2px 0 0 #1a1a1a',
+          }}
+        />
+        <span className="pointer-events-none absolute -top-1 -right-1 w-3 h-3 rounded-full bg-brand-yellow border-2 border-brand-black opacity-0 group-hover:opacity-100 transition-opacity" />
+      </div>
+      <span className="text-[11px] uppercase tracking-wide text-brand-black/70 text-center max-w-[80px] leading-tight font-body group-hover:text-brand-black transition-colors">
         {name}
       </span>
     </motion.button>
