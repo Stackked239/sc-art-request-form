@@ -249,6 +249,9 @@ function useStepAnimation(optionsDelay = 400) {
 
 export default function ArtRequestForm({ embedded = false }: { embedded?: boolean } = {}) {
   const [step, setStep] = useState<Step>('confirm-apparel');
+  const [stepHistory, setStepHistory] = useState<Step[]>([]);
+  const isBackNavRef = useRef(false);
+  const prevStepRef = useRef<Step>('confirm-apparel');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string>(typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
@@ -318,7 +321,7 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
   const [selectedApparelTypes, setSelectedApparelTypes] = useState<string[]>([]);
   const [colorsByCategory, setColorsByCategory] = useState<Record<string, ColorOption[]>>({});
   const [garmentColorsByType, setGarmentColorsByType] = useState<Record<string, string[]>>({});
-  const [selectedArtworkSetupType, setSelectedArtworkSetupType] = useState<string | null>(null);
+  const [selectedArtworkSetupTypes, setSelectedArtworkSetupTypes] = useState<string[]>([]);
   const [artworkSetupHelpOpen, setArtworkSetupHelpOpen] = useState(false);
 
   // Apparel review state
@@ -363,6 +366,52 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { confirmApparelAnim.start(); }, []);
+
+  // -- Step history tracking (for Back button) --
+  useEffect(() => {
+    if (step === prevStepRef.current) return;
+    if (isBackNavRef.current) {
+      isBackNavRef.current = false;
+    } else if (prevStepRef.current !== 'welcome') {
+      setStepHistory((h) => [...h, prevStepRef.current]);
+    }
+    prevStepRef.current = step;
+  }, [step]);
+
+  const stepAnimRestart: Partial<Record<Step, () => void>> = {
+    'confirm-apparel': confirmApparelAnim.start,
+    'garment-color': garmentColorAnim.start,
+    'artwork-setup-type': artworkSetupAnim.start,
+    'placement-select': placementAnim.start,
+    'artwork-type': artworkTypeAnim.start,
+    'template-details': templateDetailsAnim.start,
+    'file-upload': fileUploadAnim.start,
+    'artwork-details': artworkDetailsAnim.start,
+    'creative-questionnaire': creativeQuestionnaireAnim.start,
+    'ink-color': inkColorAnim.start,
+    'add-location': addLocationAnim.start,
+    'additional-comments': additionalCommentsAnim.start,
+    'apparel-review': apparelReviewAnim.start,
+    'product-type': productTypeAnim.start,
+    'sizing-select': sizingSelectAnim.start,
+    'product-select': productSelectAnim.start,
+    'color-select': colorSelectAnim.start,
+    'promo-product': promoProductAnim.start,
+    'promo-art-concept': promoArtConceptAnim.start,
+    'promo-art-files': promoArtFilesAnim.start,
+    'promo-review': promoReviewAnim.start,
+  };
+
+  const handleBack = () => {
+    setStepHistory((h) => {
+      if (h.length === 0) return h;
+      const prev = h[h.length - 1];
+      isBackNavRef.current = true;
+      setStep(prev);
+      stepAnimRestart[prev]?.();
+      return h.slice(0, -1);
+    });
+  };
 
   const handleGetStarted = () => {
     setStep('product-type');
@@ -464,8 +513,21 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
   const allTypesHaveColor = selectedApparelTypes.length > 0
     && selectedApparelTypes.every((t) => (garmentColorsByType[t]?.length ?? 0) > 0);
 
-  const handleArtworkSetupSelect = (id: string) => {
-    setSelectedArtworkSetupType(id);
+  const toggleArtworkSetupType = (id: string) => {
+    setSelectedArtworkSetupTypes((prev) => {
+      // Single is mutually exclusive with adult/youth.
+      if (id === 'single') {
+        return prev.includes('single') ? [] : ['single'];
+      }
+      const withoutSingle = prev.filter((x) => x !== 'single');
+      return withoutSingle.includes(id)
+        ? withoutSingle.filter((x) => x !== id)
+        : [...withoutSingle, id];
+    });
+  };
+
+  const handleArtworkSetupContinue = () => {
+    if (selectedArtworkSetupTypes.length === 0) return;
     setStep('placement-select');
     placementAnim.start();
   };
@@ -918,8 +980,10 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
     .map((id) => APPAREL_TYPE_OPTIONS.find((o) => o.id === id)?.label)
     .filter(Boolean)
     .join(', ');
-  const artworkSetupLabel =
-    ARTWORK_SETUP_OPTIONS.find((o) => o.id === selectedArtworkSetupType)?.label ?? '';
+  const artworkSetupLabel = selectedArtworkSetupTypes
+    .map((id) => ARTWORK_SETUP_OPTIONS.find((o) => o.id === id)?.label)
+    .filter(Boolean)
+    .join(' + ');
 
   // -- Render --
 
@@ -953,6 +1017,22 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
             </div>
           </div>
         </header>
+      )}
+
+      {/* Floating Back button */}
+      {stepHistory.length > 0 && step !== 'submitted' && (
+        <motion.button
+          type="button"
+          onClick={handleBack}
+          className="fixed left-4 bottom-4 sm:left-6 sm:bottom-6 z-40 inline-flex items-center gap-2 bg-white border-2 border-brand-black rounded-full pl-3 pr-4 py-2 sc-display text-sm uppercase tracking-wide text-brand-black sc-lift cursor-pointer"
+          style={{ boxShadow: '3px 3px 0 0 #1a1a1a' }}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          aria-label="Go back to previous step"
+        >
+          <span aria-hidden>←</span> Back
+        </motion.button>
       )}
 
       {/* Chat area */}
@@ -1667,7 +1747,7 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
               {artworkSetupAnim.showMessage && (
                 <ChatBubble key="as-msg" message="Choose your artwork setup type." />
               )}
-              {pastArtworkSetup && selectedArtworkSetupType && (
+              {pastArtworkSetup && selectedArtworkSetupTypes.length > 0 && (
                 <UserReply text={artworkSetupLabel} />
               )}
               <AnimatePresence>
@@ -1680,33 +1760,58 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
                     exit={{ opacity: 0, transition: { duration: 0.2 } }}
                     transition={{ duration: 0.3 }}
                   >
+                    <p className="text-[11px] font-heading uppercase tracking-[0.18em] text-brand-black/55 mb-3">
+                      Select Adult and/or Youth — or pick Single Setup on its own
+                    </p>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
-                      {ARTWORK_SETUP_OPTIONS.map((opt, i) => (
-                        <motion.button
-                          key={opt.id}
-                          type="button"
-                          className="group relative bg-white border-2 border-brand-black rounded-[22px] overflow-hidden text-left cursor-pointer sc-lift"
-                          style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
-                          initial={{ opacity: 0, y: 16, rotate: -1 }}
-                          animate={{ opacity: 1, y: 0, rotate: 0 }}
-                          transition={{ duration: 0.5, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
-                          onClick={() => handleArtworkSetupSelect(opt.id)}
-                        >
-                          <div className="relative aspect-[4/3] bg-brand-butter overflow-hidden">
-                            <div className="absolute inset-0 sc-dotgrid opacity-30" />
-                            <ArtworkSetupIllustration kind={opt.id as 'adult' | 'youth' | 'single'} />
-                          </div>
-                          <div className="px-4 py-3 border-t-2 border-brand-black bg-white">
-                            <p className="sc-display text-lg uppercase text-brand-black leading-tight">{opt.label}</p>
-                            <p className="text-[11px] font-body text-brand-black/55 mt-0.5">
-                              {opt.id === 'adult' && '~12" print · adult sizes'}
-                              {opt.id === 'youth' && '~9" print · youth sizes'}
-                              {opt.id === 'single' && '~9" print · all sizes'}
-                            </p>
-                          </div>
-                        </motion.button>
-                      ))}
+                      {ARTWORK_SETUP_OPTIONS.map((opt, i) => {
+                        const isSelected = selectedArtworkSetupTypes.includes(opt.id);
+                        return (
+                          <motion.button
+                            key={opt.id}
+                            type="button"
+                            className={`group relative bg-white border-2 border-brand-black rounded-[22px] overflow-hidden text-left cursor-pointer sc-lift ${isSelected ? 'ring-4 ring-brand-orange' : ''}`}
+                            style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
+                            initial={{ opacity: 0, y: 16, rotate: -1 }}
+                            animate={{ opacity: 1, y: 0, rotate: 0 }}
+                            transition={{ duration: 0.5, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
+                            onClick={() => toggleArtworkSetupType(opt.id)}
+                            aria-pressed={isSelected}
+                          >
+                            <div className="relative aspect-[4/3] bg-brand-butter overflow-hidden">
+                              <div className="absolute inset-0 sc-dotgrid opacity-30" />
+                              <ArtworkSetupIllustration kind={opt.id as 'adult' | 'youth' | 'single'} />
+                              {isSelected && (
+                                <span className="absolute top-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded-full bg-brand-orange text-brand-black border-2 border-brand-black text-sm font-bold">
+                                  ✓
+                                </span>
+                              )}
+                            </div>
+                            <div className="px-4 py-3 border-t-2 border-brand-black bg-white">
+                              <p className="sc-display text-lg uppercase text-brand-black leading-tight">{opt.label}</p>
+                              <p className="text-[11px] font-body text-brand-black/55 mt-0.5">
+                                {opt.id === 'adult' && '~12" print · adult sizes'}
+                                {opt.id === 'youth' && '~9" print · youth sizes'}
+                                {opt.id === 'single' && '~9" print · all sizes'}
+                              </p>
+                            </div>
+                          </motion.button>
+                        );
+                      })}
                     </div>
+
+                    <motion.button
+                      type="button"
+                      onClick={handleArtworkSetupContinue}
+                      disabled={selectedArtworkSetupTypes.length === 0}
+                      className="mt-5 inline-flex items-center gap-2 bg-brand-orange text-brand-black px-6 py-3 rounded-full sc-display text-base uppercase border-2 border-brand-black sc-lift disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                      style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3, delay: 0.3 }}
+                    >
+                      Continue <span aria-hidden>→</span>
+                    </motion.button>
 
                     <button
                       type="button"
