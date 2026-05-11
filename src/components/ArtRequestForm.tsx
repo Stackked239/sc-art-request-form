@@ -24,6 +24,9 @@ type Step =
   | 'product-select'
   | 'color-select'       // apparel color OR promo color
   | 'promo-product'      // promo: pick product name within a category
+  | 'confirm-apparel'    // SF-prefilled flow: confirm apparel type
+  | 'garment-color'      // SF-prefilled flow: pick garment color
+  | 'artwork-setup-type' // SF-prefilled flow: adult / youth / single
   | 'artwork-type'       // apparel: what type of artwork
   | 'template-details'   // apparel "template": customise template fields
   | 'file-upload'        // apparel "own art": upload files
@@ -158,6 +161,42 @@ const ADD_LOCATION_OPTIONS = [
   { id: 'no', label: "No, I'm all set", icon: '✅' },
 ];
 
+const APPAREL_TYPE_OPTIONS: { id: string; label: string; imageSrc: string }[] = [
+  {
+    id: 'short-sleeve',
+    label: 'Short Sleeve',
+    imageSrc: 'https://cdn.prod.website-files.com/65cfbeb48bcaf136bfe30447/66bc12661c367f75b3707b1b_jpeg_SC-05339_Heather-REd.webp',
+  },
+  {
+    id: 'long-sleeve',
+    label: 'Long Sleeve',
+    imageSrc: 'https://cdn.prod.website-files.com/65cfbeb48bcaf136bfe30447/65cfbeb48bcaf136bfe31730_SC-05569.jpeg',
+  },
+  {
+    id: 'crew-neck',
+    label: 'Crew Neck',
+    imageSrc: 'https://cdn.prod.website-files.com/65cfbeb48bcaf136bfe30447/671fe46df8393985b1a83169_Apparel%20crewneck.webp',
+  },
+  {
+    id: 'hoodie',
+    label: 'Hoodie',
+    imageSrc: 'https://cdn.prod.website-files.com/65cfbeb48bcaf136bfe303ff/65cfbeb48bcaf136bfe3043e_Apparel%20Hoodie-07238.webp',
+  },
+];
+
+const APPAREL_TYPE_TO_CATEGORY: Record<string, string | null> = {
+  'short-sleeve': 'Super Soft Tee',
+  'long-sleeve': 'Super Soft Long Sleeve',
+  'crew-neck': 'Super Soft Crewneck',
+  'hoodie': 'Super Soft Hoodie',
+};
+
+const ARTWORK_SETUP_OPTIONS = [
+  { id: 'adult', label: 'Adult', icon: '🧑' },
+  { id: 'youth', label: 'Youth', icon: '🧒' },
+  { id: 'single', label: 'Single Setup', icon: '🎯' },
+];
+
 const PLACEMENT_OPTIONS: CardOption[] = [
   {
     title: 'Front Imprint',
@@ -209,7 +248,7 @@ function useStepAnimation(optionsDelay = 400) {
 // -- Main component --
 
 export default function ArtRequestForm({ embedded = false }: { embedded?: boolean } = {}) {
-  const [step, setStep] = useState<Step>('placement-select');
+  const [step, setStep] = useState<Step>('confirm-apparel');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string>(typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
@@ -271,6 +310,16 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
   const addLocationAnim = useStepAnimation();
   const inkColorAnim = useStepAnimation();
   const additionalCommentsAnim = useStepAnimation();
+  const confirmApparelAnim = useStepAnimation();
+  const garmentColorAnim = useStepAnimation();
+  const artworkSetupAnim = useStepAnimation();
+
+  // SF-prefilled flow state
+  const [selectedApparelTypes, setSelectedApparelTypes] = useState<string[]>([]);
+  const [colorsByCategory, setColorsByCategory] = useState<Record<string, ColorOption[]>>({});
+  const [garmentColorsByType, setGarmentColorsByType] = useState<Record<string, string[]>>({});
+  const [selectedArtworkSetupType, setSelectedArtworkSetupType] = useState<string | null>(null);
+  const [artworkSetupHelpOpen, setArtworkSetupHelpOpen] = useState(false);
 
   // Apparel review state
   const [selectedApparelColor, setSelectedApparelColor] = useState<string | null>(null);
@@ -310,10 +359,10 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
     return () => timers.forEach(clearTimeout);
   }, [step, colors, promoProducts, promoCategories, availableApparelProducts, uploadedFiles, templateFiles, completedLocations, selectedArtworkType, inkColorChoice, pmsEntries, selectedSpecialtyInks]);
 
-  // -- Initial step: placement-select (run once on mount) --
+  // -- Initial step: confirm-apparel (run once on mount) --
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { placementAnim.start(); }, []);
+  useEffect(() => { confirmApparelAnim.start(); }, []);
 
   const handleGetStarted = () => {
     setStep('product-type');
@@ -355,6 +404,70 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
 
     setStep('product-select');
     productSelectAnim.start();
+  };
+
+  // -- SF-prefilled: Confirm Apparel --
+
+  const toggleApparelType = (optionId: string) => {
+    setSelectedApparelTypes((prev) =>
+      prev.includes(optionId) ? prev.filter((id) => id !== optionId) : [...prev, optionId]
+    );
+  };
+
+  const handleApparelTypesContinue = async () => {
+    if (selectedApparelTypes.length === 0) return;
+    const categories = selectedApparelTypes
+      .map((id) => APPAREL_TYPE_TO_CATEGORY[id])
+      .filter((c): c is string => Boolean(c));
+    setSelectedProduct(categories.join(', '));
+
+    const next: Record<string, ColorOption[]> = {};
+    await Promise.all(
+      selectedApparelTypes.map(async (typeId) => {
+        const category = APPAREL_TYPE_TO_CATEGORY[typeId];
+        if (!category) return;
+        const { data, error } = await supabase
+          .from('apparel')
+          .select('color_name, color_hex')
+          .eq('product_category', category)
+          .order('color_name');
+        if (error || !data) return;
+        next[typeId] = data.map((r) => ({ name: r.color_name, hex: r.color_hex }));
+      })
+    );
+    setColorsByCategory(next);
+
+    setStep('garment-color');
+    garmentColorAnim.start();
+  };
+
+  const toggleGarmentColor = (typeId: string, colorName: string) => {
+    setGarmentColorsByType((prev) => {
+      const current = prev[typeId] ?? [];
+      const updated = current.includes(colorName)
+        ? current.filter((c) => c !== colorName)
+        : [...current, colorName];
+      return { ...prev, [typeId]: updated };
+    });
+  };
+
+  const handleGarmentColorsContinue = () => {
+    // Pick the first selected color as the legacy single-color field for downstream submission.
+    const firstType = selectedApparelTypes.find((t) => (garmentColorsByType[t]?.length ?? 0) > 0);
+    const firstColor = firstType ? garmentColorsByType[firstType][0] : null;
+    setSelectedApparelColor(firstColor);
+    setSummaryData(null);
+    setStep('artwork-setup-type');
+    artworkSetupAnim.start();
+  };
+
+  const allTypesHaveColor = selectedApparelTypes.length > 0
+    && selectedApparelTypes.every((t) => (garmentColorsByType[t]?.length ?? 0) > 0);
+
+  const handleArtworkSetupSelect = (id: string) => {
+    setSelectedArtworkSetupType(id);
+    setStep('placement-select');
+    placementAnim.start();
   };
 
   // -- Step: Product Select (apparel product or promo category) --
@@ -796,6 +909,17 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
   // Active location visibility: steps where the active location sections should show
   const activeLocationSteps: Step[] = ['placement-select', 'artwork-type', 'template-details', 'file-upload', 'artwork-details', 'creative-questionnaire', 'ink-color', 'add-location'];
   const inActiveLocation = activeLocationSteps.includes(step);
+
+  // SF-prefilled flow visibility (chat-history persistence after step is passed)
+  const pastConfirmApparel = step !== 'confirm-apparel';
+  const pastGarmentColor = pastConfirmApparel && step !== 'garment-color';
+  const pastArtworkSetup = pastGarmentColor && step !== 'artwork-setup-type';
+  const apparelTypeLabel = selectedApparelTypes
+    .map((id) => APPAREL_TYPE_OPTIONS.find((o) => o.id === id)?.label)
+    .filter(Boolean)
+    .join(', ');
+  const artworkSetupLabel =
+    ARTWORK_SETUP_OPTIONS.find((o) => o.id === selectedArtworkSetupType)?.label ?? '';
 
   // -- Render --
 
@@ -1326,6 +1450,334 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
               <UserReply text={i < completedLocations.length - 1 || step !== 'apparel-review' ? 'Yes' : "No, I'm all set"} />
             </div>
           ))}
+
+          {/* --- Confirm Apparel (SF-prefilled flow) --- */}
+          <>
+            <AnimatePresence>
+              {confirmApparelAnim.showTyping && (
+                <motion.div key="ca-typing" exit={{ opacity: 0, transition: { duration: 0.2 } }}>
+                  <TypingIndicator />
+                </motion.div>
+              )}
+            </AnimatePresence>
+            {confirmApparelAnim.showMessage && (
+              <ChatBubble key="ca-msg" message="Let's confirm your apparel." />
+            )}
+            {pastConfirmApparel && selectedApparelTypes.length > 0 && (
+              <UserReply text={apparelTypeLabel} />
+            )}
+            <AnimatePresence>
+              {confirmApparelAnim.showOptions && step === 'confirm-apparel' && (
+                <motion.div
+                  key="ca-options"
+                  className="px-4 pl-15"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0, transition: { duration: 0.2 } }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <p className="text-[11px] font-heading uppercase tracking-[0.18em] text-brand-black/55 mb-3">
+                    Select all that apply
+                  </p>
+                  <OptionsGrid>
+                    {APPAREL_TYPE_OPTIONS.map((opt, i) => {
+                      const isSelected = selectedApparelTypes.includes(opt.id);
+                      return (
+                        <motion.button
+                          key={opt.id}
+                          type="button"
+                          className={`group relative overflow-hidden rounded-[26px] bg-white border-2 border-brand-black cursor-pointer w-full text-left sc-lift ${isSelected ? 'ring-4 ring-brand-orange' : ''}`}
+                          style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
+                          initial={{ opacity: 0, y: 24, rotate: -1 }}
+                          animate={{ opacity: 1, y: 0, rotate: 0 }}
+                          transition={{ duration: 0.55, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
+                          onClick={() => toggleApparelType(opt.id)}
+                          aria-pressed={isSelected}
+                        >
+                          <div className="relative w-full aspect-[4/3] overflow-hidden bg-brand-butter">
+                            <div className="absolute inset-0 sc-dotgrid opacity-40" />
+                            <Image
+                              src={opt.imageSrc}
+                              alt={opt.label}
+                              fill
+                              className="object-cover transition-transform duration-500 ease-out group-hover:scale-[1.07] group-hover:rotate-[0.6deg]"
+                              sizes="(max-width: 768px) 100vw, 300px"
+                            />
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/15 to-transparent" />
+                            {isSelected && (
+                              <span className="absolute top-3 right-3 inline-flex items-center justify-center w-8 h-8 rounded-full bg-brand-orange text-brand-black border-2 border-brand-black text-base font-bold">
+                                ✓
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between gap-3 px-5 py-4 border-t-2 border-brand-black bg-white">
+                            <h3 className="sc-display text-2xl uppercase text-brand-black">{opt.label}</h3>
+                            <span
+                              className={`inline-flex items-center justify-center w-8 h-8 rounded-full border-2 border-brand-black text-base transition-colors ${isSelected ? 'bg-brand-orange text-brand-black' : 'bg-white text-brand-black'}`}
+                              aria-hidden
+                            >
+                              {isSelected ? '✓' : '+'}
+                            </span>
+                          </div>
+                        </motion.button>
+                      );
+                    })}
+                  </OptionsGrid>
+
+                  <motion.button
+                    type="button"
+                    onClick={handleApparelTypesContinue}
+                    disabled={selectedApparelTypes.length === 0}
+                    className="mt-5 inline-flex items-center gap-2 bg-brand-orange text-brand-black px-6 py-3 rounded-full sc-display text-base uppercase border-2 border-brand-black sc-lift disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: 0.4 }}
+                  >
+                    Continue <span aria-hidden>→</span>
+                  </motion.button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+
+          {/* --- Garment Color (SF-prefilled flow, per apparel type) --- */}
+          {pastConfirmApparel && (
+            <>
+              <AnimatePresence>
+                {garmentColorAnim.showTyping && (
+                  <motion.div key="gc-typing" exit={{ opacity: 0, transition: { duration: 0.2 } }}>
+                    <TypingIndicator />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              {garmentColorAnim.showMessage && (
+                <ChatBubble
+                  key="gc-msg"
+                  message={selectedApparelTypes.length > 1
+                    ? "Choose your garment colors for each apparel type."
+                    : "Choose your garment color."}
+                />
+              )}
+              {pastGarmentColor && Object.keys(garmentColorsByType).length > 0 && (
+                <UserReply
+                  text={selectedApparelTypes
+                    .map((t) => {
+                      const label = APPAREL_TYPE_OPTIONS.find((o) => o.id === t)?.label ?? t;
+                      const picks = garmentColorsByType[t] ?? [];
+                      return picks.length ? `${label}: ${picks.join(', ')}` : null;
+                    })
+                    .filter(Boolean)
+                    .join(' · ')}
+                />
+              )}
+              <AnimatePresence>
+                {garmentColorAnim.showOptions && step === 'garment-color' && (
+                  <motion.div
+                    key="gc-sections"
+                    className="px-4 pl-15"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, transition: { duration: 0.2 } }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <div className="space-y-6">
+                      {selectedApparelTypes.map((typeId) => {
+                        const opt = APPAREL_TYPE_OPTIONS.find((o) => o.id === typeId);
+                        const swatches = colorsByCategory[typeId] ?? [];
+                        const selected = garmentColorsByType[typeId] ?? [];
+                        return (
+                          <div key={typeId} className="max-w-lg">
+                            <div className="flex items-baseline justify-between mb-3">
+                              <h4 className="sc-display text-lg uppercase text-brand-black">
+                                {opt?.label ?? typeId}
+                              </h4>
+                              <span className="text-[11px] font-heading uppercase tracking-[0.18em] text-brand-black/55">
+                                {selected.length} selected
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-4">
+                              {swatches.map((c, i) => {
+                                const isSelected = selected.includes(c.name);
+                                const displayHex = c.hex || '#CCCCCC';
+                                return (
+                                  <motion.button
+                                    key={`${typeId}-${c.name}`}
+                                    type="button"
+                                    className="flex flex-col items-center gap-2 group cursor-pointer w-[78px]"
+                                    initial={{ opacity: 0, scale: 0.7, y: 8 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    transition={{ duration: 0.4, delay: i * 0.03, ease: [0.22, 1, 0.36, 1] }}
+                                    whileHover={{ y: -3 }}
+                                    whileTap={{ scale: 0.92 }}
+                                    onClick={() => toggleGarmentColor(typeId, c.name)}
+                                    aria-pressed={isSelected}
+                                  >
+                                    <div className="relative">
+                                      <div
+                                        className={`w-14 h-14 rounded-full border-2 border-brand-black transition-all duration-200 ${isSelected ? 'ring-4 ring-brand-orange ring-offset-2 ring-offset-brand-daylight' : 'group-hover:ring-4 group-hover:ring-brand-orange/60 group-hover:ring-offset-2 group-hover:ring-offset-brand-daylight'}`}
+                                        style={{ backgroundColor: displayHex, boxShadow: '2px 2px 0 0 #1a1a1a' }}
+                                      />
+                                      {isSelected && (
+                                        <span className="pointer-events-none absolute -top-1 -right-1 w-5 h-5 rounded-full bg-brand-orange border-2 border-brand-black flex items-center justify-center text-[10px] font-bold text-brand-black">
+                                          ✓
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-[11px] uppercase tracking-wide text-brand-black/70 text-center max-w-[80px] leading-tight font-body group-hover:text-brand-black transition-colors">
+                                      {c.name}
+                                    </span>
+                                  </motion.button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <motion.button
+                      type="button"
+                      onClick={handleGarmentColorsContinue}
+                      disabled={!allTypesHaveColor}
+                      className="mt-6 inline-flex items-center gap-2 bg-brand-orange text-brand-black px-6 py-3 rounded-full sc-display text-base uppercase border-2 border-brand-black sc-lift disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                      style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3, delay: 0.3 }}
+                    >
+                      Continue <span aria-hidden>→</span>
+                    </motion.button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </>
+          )}
+
+          {/* --- Artwork Setup Type (SF-prefilled flow) --- */}
+          {pastGarmentColor && (
+            <>
+              <AnimatePresence>
+                {artworkSetupAnim.showTyping && (
+                  <motion.div key="as-typing" exit={{ opacity: 0, transition: { duration: 0.2 } }}>
+                    <TypingIndicator />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              {artworkSetupAnim.showMessage && (
+                <ChatBubble key="as-msg" message="Choose your artwork setup type." />
+              )}
+              {pastArtworkSetup && selectedArtworkSetupType && (
+                <UserReply text={artworkSetupLabel} />
+              )}
+              <AnimatePresence>
+                {artworkSetupAnim.showOptions && step === 'artwork-setup-type' && (
+                  <motion.div
+                    key="as-options"
+                    className="px-4 pl-15"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, transition: { duration: 0.2 } }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+                      {ARTWORK_SETUP_OPTIONS.map((opt, i) => (
+                        <motion.button
+                          key={opt.id}
+                          type="button"
+                          className="group relative bg-white border-2 border-brand-black rounded-[22px] overflow-hidden text-left cursor-pointer sc-lift"
+                          style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
+                          initial={{ opacity: 0, y: 16, rotate: -1 }}
+                          animate={{ opacity: 1, y: 0, rotate: 0 }}
+                          transition={{ duration: 0.5, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
+                          onClick={() => handleArtworkSetupSelect(opt.id)}
+                        >
+                          <div className="relative aspect-[4/3] bg-brand-butter overflow-hidden">
+                            <div className="absolute inset-0 sc-dotgrid opacity-30" />
+                            <ArtworkSetupIllustration kind={opt.id as 'adult' | 'youth' | 'single'} />
+                          </div>
+                          <div className="px-4 py-3 border-t-2 border-brand-black bg-white">
+                            <p className="sc-display text-lg uppercase text-brand-black leading-tight">{opt.label}</p>
+                            <p className="text-[11px] font-body text-brand-black/55 mt-0.5">
+                              {opt.id === 'adult' && '~12" print · adult sizes'}
+                              {opt.id === 'youth' && '~9" print · youth sizes'}
+                              {opt.id === 'single' && '~9" print · all sizes'}
+                            </p>
+                          </div>
+                        </motion.button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setArtworkSetupHelpOpen((v) => !v)}
+                      className="mt-4 text-[11px] font-heading uppercase tracking-[0.18em] text-brand-black/60 hover:text-brand-black underline underline-offset-4 cursor-pointer"
+                    >
+                      {artworkSetupHelpOpen ? 'Hide help' : "Not sure? See what's the difference"}
+                    </button>
+
+                    <AnimatePresence>
+                      {artworkSetupHelpOpen && (
+                        <motion.div
+                          key="as-help"
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.3 }}
+                          className="overflow-hidden"
+                        >
+                          <div
+                            className="mt-3 bg-brand-butter/50 border-2 border-brand-black rounded-2xl p-5 text-[13px] font-body text-brand-black space-y-4 max-w-md"
+                            style={{ boxShadow: '3px 3px 0 0 #1a1a1a' }}
+                          >
+                            <div>
+                              <p className="sc-display text-base uppercase mb-1">Youth</p>
+                              <ul className="list-disc pl-5 space-y-0.5">
+                                <li>Designed specifically for youth shirts</li>
+                                <li>Standard print width: ~9 inches</li>
+                                <li>Scales well for smaller garment sizes</li>
+                                <li>On adult shirts, this size will look noticeably small</li>
+                              </ul>
+                            </div>
+                            <div>
+                              <p className="sc-display text-base uppercase mb-1">Adult</p>
+                              <ul className="list-disc pl-5 space-y-0.5">
+                                <li>Designed for adult shirts only</li>
+                                <li>Standard print width: ~12 inches</li>
+                                <li>Provides a full, proportional look on adult sizes</li>
+                                <li>Too large to print on youth garments</li>
+                              </ul>
+                            </div>
+                            <div>
+                              <p className="sc-display text-base uppercase mb-1">Single Set Up</p>
+                              <ul className="list-disc pl-5 space-y-0.5">
+                                <li>Uses youth-sized artwork (~9&quot;) across all shirts</li>
+                                <li>Works on both youth + adult garments</li>
+                                <li>Design will look small on adult garments</li>
+                              </ul>
+                            </div>
+                            <div className="text-[12px] text-brand-black/75 border-t-2 border-brand-black/20 pt-3">
+                              <p className="font-semibold mb-1">Minimums per setup:</p>
+                              <p>Total minimum of 12 pieces for single ink color water-base prints and digital prints, and 36 pieces for multi ink color water-base prints and plastisol prints.</p>
+                            </div>
+                            <div className="text-[12px] border-t-2 border-brand-black/20 pt-3">
+                              <p className="sc-display text-sm uppercase mb-1">Quick Summary</p>
+                              <ul className="list-disc pl-5 space-y-0.5">
+                                <li>Best fit + best look across all sizes? → Do both youth + adult setups</li>
+                                <li>Budget-friendly? → Single setup</li>
+                                <li>Youth-only order? → Single youth setup</li>
+                                <li>Adult-only order? → Adult setup</li>
+                              </ul>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </>
+          )}
 
           {/* --- Placement Select (active location) --- */}
           {inActiveLocation && (
@@ -2208,6 +2660,90 @@ function DesignCard({ design }: { design: Design }) {
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function ArtworkSetupIllustration({ kind }: { kind: 'adult' | 'youth' | 'single' }) {
+  // Tee outline path (centered around 0,0 in a 200x150 viewBox)
+  // Print box is sized to convey relative print size.
+  const Tee = ({ x, scale, printW, printH, sizeLabel }: { x: number; scale: number; printW: number; printH: number; sizeLabel: string }) => {
+    const cx = x;
+    const cy = 78;
+    // Tee dimensions
+    const w = 60 * scale;
+    const h = 75 * scale;
+    const sleeve = 14 * scale;
+    const neckW = 14 * scale;
+    const neckH = 6 * scale;
+    const top = cy - h / 2;
+    const bottom = cy + h / 2;
+    const left = cx - w / 2;
+    const right = cx + w / 2;
+    const path = `
+      M ${left} ${top + 8 * scale}
+      L ${left - sleeve} ${top + 18 * scale}
+      L ${left - sleeve + 4 * scale} ${top + 30 * scale}
+      L ${left} ${top + 22 * scale}
+      L ${left} ${bottom}
+      L ${right} ${bottom}
+      L ${right} ${top + 22 * scale}
+      L ${right + sleeve - 4 * scale} ${top + 30 * scale}
+      L ${right + sleeve} ${top + 18 * scale}
+      L ${right} ${top + 8 * scale}
+      Q ${cx + neckW / 2} ${top + 2 * scale} ${cx} ${top + neckH}
+      Q ${cx - neckW / 2} ${top + 2 * scale} ${left} ${top + 8 * scale}
+      Z
+    `;
+    return (
+      <g>
+        <path d={path} fill="#FFFFFF" stroke="#1a1a1a" strokeWidth="2" strokeLinejoin="round" />
+        {/* Print box */}
+        <rect
+          x={cx - printW / 2}
+          y={cy - printH / 2 - 2}
+          width={printW}
+          height={printH}
+          fill="none"
+          stroke="#F6912D"
+          strokeWidth="2"
+          strokeDasharray="4 3"
+          rx="2"
+        />
+        <text
+          x={cx}
+          y={cy - printH / 2 - 6}
+          textAnchor="middle"
+          fontSize="9"
+          fontFamily="ui-sans-serif, system-ui"
+          fontWeight="700"
+          fill="#1a1a1a"
+        >
+          {sizeLabel}
+        </text>
+      </g>
+    );
+  };
+
+  if (kind === 'adult') {
+    return (
+      <svg viewBox="0 0 200 150" className="absolute inset-0 w-full h-full p-2">
+        <Tee x={100} scale={1.25} printW={56} printH={48} sizeLabel={'12"'} />
+      </svg>
+    );
+  }
+  if (kind === 'youth') {
+    return (
+      <svg viewBox="0 0 200 150" className="absolute inset-0 w-full h-full p-2">
+        <Tee x={100} scale={0.9} printW={36} printH={32} sizeLabel={'9"'} />
+      </svg>
+    );
+  }
+  // single: youth-sized print on both an adult tee and a youth tee
+  return (
+    <svg viewBox="0 0 200 150" className="absolute inset-0 w-full h-full p-2">
+      <Tee x={68} scale={1.15} printW={32} printH={28} sizeLabel={'9"'} />
+      <Tee x={148} scale={0.78} printW={28} printH={24} sizeLabel={'9"'} />
+    </svg>
   );
 }
 
