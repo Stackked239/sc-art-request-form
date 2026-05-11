@@ -1800,26 +1800,28 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
                       })}
                     </div>
 
-                    <motion.button
-                      type="button"
-                      onClick={handleArtworkSetupContinue}
-                      disabled={selectedArtworkSetupTypes.length === 0}
-                      className="mt-5 inline-flex items-center gap-2 bg-brand-orange text-brand-black px-6 py-3 rounded-full sc-display text-base uppercase border-2 border-brand-black sc-lift disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                      style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: 0.3 }}
-                    >
-                      Continue <span aria-hidden>→</span>
-                    </motion.button>
+                    <div className="mt-5 flex flex-col items-start gap-4">
+                      <motion.button
+                        type="button"
+                        onClick={handleArtworkSetupContinue}
+                        disabled={selectedArtworkSetupTypes.length === 0}
+                        className="inline-flex items-center gap-2 bg-brand-orange text-brand-black px-6 py-3 rounded-full sc-display text-base uppercase border-2 border-brand-black sc-lift disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                        style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: 0.3 }}
+                      >
+                        Continue <span aria-hidden>→</span>
+                      </motion.button>
 
-                    <button
-                      type="button"
-                      onClick={() => setArtworkSetupHelpOpen((v) => !v)}
-                      className="mt-4 text-[11px] font-heading uppercase tracking-[0.18em] text-brand-black/60 hover:text-brand-black underline underline-offset-4 cursor-pointer"
-                    >
-                      {artworkSetupHelpOpen ? 'Hide help' : "Not sure? See what's the difference"}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => setArtworkSetupHelpOpen((v) => !v)}
+                        className="text-[11px] font-heading uppercase tracking-[0.18em] text-brand-black/60 hover:text-brand-black underline underline-offset-4 cursor-pointer"
+                      >
+                        {artworkSetupHelpOpen ? 'Hide help' : "Not sure? See what's the difference"}
+                      </button>
+                    </div>
 
                     <AnimatePresence>
                       {artworkSetupHelpOpen && (
