@@ -13,9 +13,23 @@ interface Design {
   ink_colors: string | null;
   garment_colors: string[] | null;
   product_types: string[] | null;
-  thumbnail_url: string;
+  thumbnail_url: string | null;
   image_urls: string[] | null;
+  category: string | null;
 }
+
+const CATEGORIES = [
+  'Summer',
+  'Winter',
+  'Fall',
+  'VBS',
+  'Camp',
+  'Missions',
+  'DNOW',
+  'Baptism',
+  'Sun Reveal',
+  'Wet Reveal',
+] as const;
 
 interface TemplatePickerProps {
   open: boolean;
@@ -52,6 +66,7 @@ export default function TemplatePicker({
   const [designs, setDesigns] = useState<Design[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [preview, setPreview] = useState<Design | null>(null);
@@ -80,10 +95,10 @@ export default function TemplatePicker({
     let query = supabase
       .from('customizable_designs')
       .select(
-        'id, design_id, name, description, ink_colors, garment_colors, product_types, thumbnail_url, image_urls',
+        'id, design_id, name, description, ink_colors, garment_colors, product_types, thumbnail_url, image_urls, category',
         { count: 'exact' }
       )
-      .order('name')
+      .order('name', { ascending: false })
       .range(from, to);
 
     if (searchTerm.trim()) {
@@ -92,6 +107,10 @@ export default function TemplatePicker({
 
     if (productTypeFilters.length > 0) {
       query = query.overlaps('product_types', productTypeFilters);
+    }
+
+    if (selectedCategory) {
+      query = query.eq('category', selectedCategory);
     }
 
     const { data, error, count } = await query;
@@ -117,13 +136,13 @@ export default function TemplatePicker({
     }
   };
 
-  // Load initial page when modal opens or search changes
+  // Load initial page when modal opens or filters change
   useEffect(() => {
     if (!open) return;
     pageRef.current = 0;
     fetchPage(0, search, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, search, productTypeFilters]);
+  }, [open, search, productTypeFilters, selectedCategory]);
 
   // Keep search ref in sync
   useEffect(() => {
@@ -214,6 +233,43 @@ export default function TemplatePicker({
             </div>
           </div>
 
+          {/* Category filter */}
+          <div className="flex-shrink-0 px-6 py-3 border-b border-gray-100">
+            <div className="flex items-center gap-2 overflow-x-auto -mx-1 px-1 pb-0.5">
+              <span className="flex-shrink-0 text-[11px] uppercase tracking-[0.18em] font-heading text-gray-500 mr-1">
+                Category
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedCategory(null)}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-heading uppercase tracking-wide border transition-colors cursor-pointer ${
+                  selectedCategory === null
+                    ? 'bg-brand-black text-white border-brand-black'
+                    : 'bg-white text-gray-700 border-gray-200 hover:border-brand-orange hover:text-brand-black'
+                }`}
+              >
+                All
+              </button>
+              {CATEGORIES.map((cat) => {
+                const active = selectedCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(active ? null : cat)}
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-heading uppercase tracking-wide border transition-colors cursor-pointer ${
+                      active
+                        ? 'bg-brand-orange text-brand-black border-brand-black'
+                        : 'bg-white text-gray-700 border-gray-200 hover:border-brand-orange hover:text-brand-black'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Grid */}
           <div
             ref={scrollRef}
@@ -236,13 +292,17 @@ export default function TemplatePicker({
                   onClick={() => setPreview(d)}
                 >
                   <div className="relative aspect-square bg-gray-50">
-                    <Image
-                      src={d.thumbnail_url}
-                      alt={d.name}
-                      fill
-                      className="object-contain p-2 group-hover:scale-105 transition-transform duration-200"
-                      sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 200px"
-                    />
+                    {d.thumbnail_url ? (
+                      <Image
+                        src={d.thumbnail_url}
+                        alt={d.name}
+                        fill
+                        className="object-contain p-2 group-hover:scale-105 transition-transform duration-200"
+                        sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 200px"
+                      />
+                    ) : (
+                      <ImagePlaceholder />
+                    )}
                   </div>
                   <div className="px-3 py-2">
                     <p className="text-xs font-semibold text-gray-900 truncate">{d.name}</p>
@@ -296,16 +356,22 @@ export default function TemplatePicker({
               >
                 {/* Preview image */}
                 <div className="relative aspect-square bg-gray-50">
-                  <Image
-                    src={
+                  {(() => {
+                    const previewSrc =
                       (preview.image_urls && preview.image_urls[previewImageIdx]) ||
-                      preview.thumbnail_url
-                    }
-                    alt={preview.name}
-                    fill
-                    className="object-contain p-4"
-                    sizes="500px"
-                  />
+                      preview.thumbnail_url;
+                    return previewSrc ? (
+                      <Image
+                        src={previewSrc}
+                        alt={preview.name}
+                        fill
+                        className="object-contain p-4"
+                        sizes="500px"
+                      />
+                    ) : (
+                      <ImagePlaceholder />
+                    );
+                  })()}
                   <button
                     onClick={() => {
                       setPreview(null);
@@ -325,27 +391,29 @@ export default function TemplatePicker({
                 </div>
 
                 {/* Image thumbnails */}
-                {preview.image_urls && preview.image_urls.length > 1 && (
+                {preview.image_urls && preview.image_urls.filter(Boolean).length > 1 && (
                   <div className="flex gap-2 px-4 py-3 overflow-x-auto border-t border-gray-100">
-                    {preview.image_urls.map((url, i) => (
-                      <button
-                        key={i}
-                        className={`relative w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-colors ${
-                          i === previewImageIdx
-                            ? 'border-brand-orange'
-                            : 'border-transparent hover:border-gray-300'
-                        }`}
-                        onClick={() => setPreviewImageIdx(i)}
-                      >
-                        <Image
-                          src={url}
-                          alt=""
-                          fill
-                          className="object-contain p-1"
-                          sizes="56px"
-                        />
-                      </button>
-                    ))}
+                    {preview.image_urls.map((url, i) =>
+                      url ? (
+                        <button
+                          key={i}
+                          className={`relative w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-colors ${
+                            i === previewImageIdx
+                              ? 'border-brand-orange'
+                              : 'border-transparent hover:border-gray-300'
+                          }`}
+                          onClick={() => setPreviewImageIdx(i)}
+                        >
+                          <Image
+                            src={url}
+                            alt=""
+                            fill
+                            className="object-contain p-1"
+                            sizes="56px"
+                          />
+                        </button>
+                      ) : null
+                    )}
                   </div>
                 )}
 
@@ -385,5 +453,17 @@ export default function TemplatePicker({
         </AnimatePresence>
       </motion.div>
     </AnimatePresence>
+  );
+}
+
+function ImagePlaceholder() {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-gray-50 text-gray-300">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <circle cx="8.5" cy="8.5" r="1.5" />
+        <path d="M21 15l-5-5L5 21" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </div>
   );
 }

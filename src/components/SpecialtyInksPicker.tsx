@@ -26,54 +26,56 @@ export default function SpecialtyInksPicker({ value, onChange }: Props) {
         Add a finish with a little more attitude. Pricing is per location.
       </p>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        {SPECIALTY_INKS.map((ink) => {
+      <div className="grid grid-cols-2 gap-4 max-w-lg">
+        {SPECIALTY_INKS.map((ink, i) => {
           const checked = value.includes(ink.label);
           return (
             <motion.button
               key={ink.label}
               type="button"
               onClick={() => toggle(ink.label)}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className={`group relative flex flex-col items-center gap-2 rounded-2xl p-3 cursor-pointer border-2 border-brand-black sc-lift ${
-                checked ? 'bg-brand-butter' : 'bg-white'
+              initial={{ opacity: 0, y: 24, rotate: -1 }}
+              animate={{ opacity: 1, y: 0, rotate: 0 }}
+              transition={{ duration: 0.55, delay: i * 0.08, ease: [0.22, 1, 0.36, 1] }}
+              aria-pressed={checked}
+              className={`group relative overflow-hidden rounded-[26px] bg-white border-2 border-brand-black cursor-pointer w-full text-left sc-lift ${
+                checked ? 'ring-4 ring-brand-orange' : ''
               }`}
-              style={{
-                boxShadow: checked ? '3px 3px 0 0 #f6912d' : '3px 3px 0 0 #1a1a1a',
-              }}
+              style={{ boxShadow: '4px 4px 0 0 #1a1a1a' }}
             >
-              <div className="relative h-20 w-20 overflow-hidden rounded-xl bg-brand-daylight border-2 border-brand-black/15">
-                <div className="absolute inset-0 sc-dotgrid opacity-30" />
+              <div className="relative w-full aspect-[4/3] overflow-hidden bg-brand-butter">
+                <div className="absolute inset-0 sc-dotgrid opacity-40" />
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={`/images/specialty-inks/${ink.image}`}
                   alt={ink.label}
-                  className="relative h-full w-full object-contain p-1.5 transition-transform duration-300 group-hover:scale-[1.04]"
+                  className="relative h-full w-full object-contain p-4 transition-transform duration-500 ease-out group-hover:scale-[1.07] group-hover:rotate-[0.6deg]"
                 />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/15 to-transparent" />
+                {checked && (
+                  <span className="absolute top-3 right-3 inline-flex items-center justify-center w-8 h-8 rounded-full bg-brand-orange text-brand-black border-2 border-brand-black text-base font-bold">
+                    ✓
+                  </span>
+                )}
               </div>
-              <div className="flex flex-col items-center gap-0.5 text-center">
-                <span className="text-[12px] font-heading uppercase tracking-wide text-brand-black leading-tight">
-                  {ink.label}
-                </span>
-                <span className="text-[10px] text-brand-black/55 font-body">
-                  +${ink.price}/{ink.priceUnit}
-                </span>
-              </div>
-
-              {checked && (
-                <motion.span
-                  initial={{ scale: 0, rotate: -20 }}
-                  animate={{ scale: 1, rotate: 0 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 18 }}
-                  className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-brand-orange border-2 border-brand-black text-brand-black"
+              <div className="flex items-center justify-between gap-3 px-5 py-4 border-t-2 border-brand-black bg-white">
+                <div className="min-w-0">
+                  <h4 className="sc-display text-xl sm:text-2xl uppercase text-brand-black leading-none truncate">
+                    {ink.label}
+                  </h4>
+                  <p className="mt-1 text-[11px] uppercase tracking-wide font-heading text-brand-black/55">
+                    +${ink.price}/{ink.priceUnit}
+                  </p>
+                </div>
+                <span
+                  className={`flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border-2 border-brand-black text-base transition-colors ${
+                    checked ? 'bg-brand-orange text-brand-black' : 'bg-white text-brand-black'
+                  }`}
+                  aria-hidden
                 >
-                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                </motion.span>
-              )}
+                  {checked ? '✓' : '+'}
+                </span>
+              </div>
             </motion.button>
           );
         })}

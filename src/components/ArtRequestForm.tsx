@@ -242,7 +242,15 @@ function useStepAnimation(optionsDelay = 400) {
     }, 1200);
   }, [optionsDelay]);
 
-  return { showTyping, showMessage, showOptions, start };
+  // Skip the typing animation and show the question + options immediately —
+  // used when navigating back to a step the user has already seen.
+  const restore = useCallback(() => {
+    setShowTyping(false);
+    setShowMessage(true);
+    setShowOptions(true);
+  }, []);
+
+  return { showTyping, showMessage, showOptions, start, restore };
 }
 
 // -- Main component --
@@ -372,45 +380,58 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
     if (step === prevStepRef.current) return;
     if (isBackNavRef.current) {
       isBackNavRef.current = false;
-    } else if (prevStepRef.current !== 'welcome') {
-      setStepHistory((h) => [...h, prevStepRef.current]);
+    } else {
+      const toPush = prevStepRef.current;
+      setStepHistory((h) => (h[h.length - 1] === toPush ? h : [...h, toPush]));
     }
     prevStepRef.current = step;
   }, [step]);
 
-  const stepAnimRestart: Partial<Record<Step, () => void>> = {
-    'confirm-apparel': confirmApparelAnim.start,
-    'garment-color': garmentColorAnim.start,
-    'artwork-setup-type': artworkSetupAnim.start,
-    'placement-select': placementAnim.start,
-    'artwork-type': artworkTypeAnim.start,
-    'template-details': templateDetailsAnim.start,
-    'file-upload': fileUploadAnim.start,
-    'artwork-details': artworkDetailsAnim.start,
-    'creative-questionnaire': creativeQuestionnaireAnim.start,
-    'ink-color': inkColorAnim.start,
-    'add-location': addLocationAnim.start,
-    'additional-comments': additionalCommentsAnim.start,
-    'apparel-review': apparelReviewAnim.start,
-    'product-type': productTypeAnim.start,
-    'sizing-select': sizingSelectAnim.start,
-    'product-select': productSelectAnim.start,
-    'color-select': colorSelectAnim.start,
-    'promo-product': promoProductAnim.start,
-    'promo-art-concept': promoArtConceptAnim.start,
-    'promo-art-files': promoArtFilesAnim.start,
-    'promo-review': promoReviewAnim.start,
+  // When navigating back to a step the user has already seen, jump straight
+  // to the question + options (skip the typing animation).
+  const stepAnimRestore: Partial<Record<Step, () => void>> = {
+    'confirm-apparel': confirmApparelAnim.restore,
+    'garment-color': garmentColorAnim.restore,
+    'artwork-setup-type': artworkSetupAnim.restore,
+    'placement-select': placementAnim.restore,
+    'artwork-type': artworkTypeAnim.restore,
+    'template-details': templateDetailsAnim.restore,
+    'file-upload': fileUploadAnim.restore,
+    'artwork-details': artworkDetailsAnim.restore,
+    'creative-questionnaire': creativeQuestionnaireAnim.restore,
+    'ink-color': inkColorAnim.restore,
+    'add-location': addLocationAnim.restore,
+    'additional-comments': additionalCommentsAnim.restore,
+    'apparel-review': apparelReviewAnim.restore,
+    'product-type': productTypeAnim.restore,
+    'sizing-select': sizingSelectAnim.restore,
+    'product-select': productSelectAnim.restore,
+    'color-select': colorSelectAnim.restore,
+    'promo-product': promoProductAnim.restore,
+    'promo-art-concept': promoArtConceptAnim.restore,
+    'promo-art-files': promoArtFilesAnim.restore,
+    'promo-review': promoReviewAnim.restore,
   };
 
   const handleBack = () => {
-    setStepHistory((h) => {
-      if (h.length === 0) return h;
-      const prev = h[h.length - 1];
-      isBackNavRef.current = true;
-      setStep(prev);
-      stepAnimRestart[prev]?.();
-      return h.slice(0, -1);
-    });
+    if (stepHistory.length === 0) return;
+    let nextHistory = stepHistory.slice();
+    while (nextHistory.length > 0 && nextHistory[nextHistory.length - 1] === step) {
+      nextHistory.pop();
+    }
+    if (nextHistory.length === 0) {
+      setStepHistory([]);
+      return;
+    }
+    const prev = nextHistory[nextHistory.length - 1];
+    nextHistory = nextHistory.slice(0, -1);
+    isBackNavRef.current = true;
+    setStepHistory(nextHistory);
+    setStep(prev);
+    stepAnimRestore[prev]?.();
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   const handleGetStarted = () => {
@@ -662,6 +683,7 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
 
   const handleApparelStartOver = () => {
     setStep('welcome');
+    setStepHistory([]);
     setSelectedProductType(null);
     setSelectedSizing(null);
     setAvailableApparelProducts([]);
@@ -722,6 +744,7 @@ export default function ArtRequestForm({ embedded = false }: { embedded?: boolea
 
   const handlePromoStartOver = () => {
     setStep('welcome');
+    setStepHistory([]);
     setSelectedProductType(null);
     setSelectedPromoCategory(null);
     setSelectedPromoProduct(null);
@@ -2748,13 +2771,15 @@ function DesignCard({ design }: { design: Design }) {
       >
         <div className="relative aspect-square bg-brand-butter">
           <div className="absolute inset-0 sc-dotgrid opacity-30" />
-          <Image
-            src={design.thumbnail_url}
-            alt={design.name}
-            fill
-            className="object-contain p-4"
-            sizes="300px"
-          />
+          {design.thumbnail_url && (
+            <Image
+              src={design.thumbnail_url}
+              alt={design.name}
+              fill
+              className="object-contain p-4"
+              sizes="300px"
+            />
+          )}
         </div>
         <div className="px-4 py-3 border-t-2 border-brand-black flex items-center justify-between gap-3">
           <div className="min-w-0">
